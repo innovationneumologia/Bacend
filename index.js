@@ -55,7 +55,7 @@ app.use(helmet({
   }
 }));
 
-// CORS Configuration
+// In your server.js, update the CORS configuration:
 const allowedOrigins = [
   'http://localhost:3000',
   'http://localhost:8080',
@@ -64,7 +64,13 @@ const allowedOrigins = [
   'https://*.github.io',
   'https://*.vercel.app',
   'https://*.netlify.app',
-  'https://*.railway.app'
+  'https://*.railway.app',
+  // Add these for debugging and specific domains:
+  'https://innovationneumologia.github.io/Neumocare-Hospital-Management/',
+  'https://bacend-production.up.railway.app',
+  'http://bacend-production.up.railway.app',
+  // Allow any origin for testing (remove in production):
+  ...(process.env.NODE_ENV === 'development' ? ['*'] : [])
 ];
 
 app.use(cors({
@@ -74,25 +80,31 @@ app.use(cors({
     
     // For development/testing, allow all origins
     if (process.env.NODE_ENV === 'development') {
+      console.log('Development mode: Allowing origin:', origin);
       return callback(null, true);
     }
     
-    if (allowedOrigins.some(allowedOrigin => {
+    // Check if origin matches allowed origins
+    const isAllowed = allowedOrigins.some(allowedOrigin => {
+      if (allowedOrigin === '*') return true;
       if (allowedOrigin.includes('*')) {
-        const regex = new RegExp(allowedOrigin.replace('*', '.*'));
+        const regex = new RegExp('^' + allowedOrigin.replace('*', '.*') + '$');
         return regex.test(origin);
       }
       return allowedOrigin === origin;
-    })) {
+    });
+    
+    if (isAllowed) {
+      console.log('CORS: Allowed origin:', origin);
       callback(null, true);
     } else {
-      console.log('CORS blocked origin:', origin);
+      console.log('CORS: Blocked origin:', origin);
       callback(new Error(`Origin ${origin} not allowed by CORS`));
     }
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With']
+  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
 }));
 
 // Rate Limiting
@@ -108,10 +120,11 @@ const apiLimiter = rateLimit({
 
 const authLimiter = rateLimit({
   windowMs: 60 * 60 * 1000, // 1 hour
-  max: 5, // 5 login attempts per hour
+  max: process.env.NODE_ENV === 'development' ? 100 : 5, // Higher limit for dev
   message: {
     error: 'Too many login attempts, please try again later'
-  }
+  },
+  skipSuccessfulRequests: true
 });
 
 app.use(express.json({ limit: '10mb' }));
