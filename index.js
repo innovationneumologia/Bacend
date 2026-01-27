@@ -21,7 +21,7 @@ const PORT = process.env.PORT || 3000;
 const {
   SUPABASE_URL,
   SUPABASE_SERVICE_KEY,
-  JWT_SECRET = 'neumocare-secure-secret-2024-production-key-change-this',
+  JWT_SECRET = process.env.JWT_SECRET || 'neumocare-secure-secret-2024-production-key-change-this',
   NODE_ENV = 'development'
 } = process.env;
 
