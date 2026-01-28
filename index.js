@@ -72,35 +72,46 @@ const upload = multer({
 });
 
 // ============ SECURITY MIDDLEWARE ============
-app.use(cors({
-  origin: function(origin, callback) {
-    // Allow requests with no origin (like mobile apps, curl, Railway health checks)
-    if (!origin) return callback(null, true);
-    
-    const allowedOrigins = [
-      'http://localhost:3000',
-      'http://localhost:8080',
-      'http://127.0.0.1:5500',
-      'https://innovationneumologia.github.io',
-      'https://*.github.io',
-      'https://backend-neumocare.up.railway.app',
-      'https://bacend-production.up.railway.app' // Add your Railway URL
-    ];
-    
-    const isAllowed = allowedOrigins.some(allowedOrigin => {
+// ============ MANUAL CORS HANDLER ============
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  
+  // Allowed origins
+  const allowedOrigins = [
+    'https://innovationneumologia.github.io',
+    'https://*.github.io',
+    'http://localhost:3000',
+    'http://localhost:8080'
+  ];
+  
+  // Check if origin is allowed
+  let isAllowed = false;
+  if (origin) {
+    isAllowed = allowedOrigins.some(allowedOrigin => {
       if (allowedOrigin.includes('*')) {
-        const regex = new RegExp('^' + allowedOrigin.replace('*', '.*') + '$');
+        const pattern = allowedOrigin.replace(/\*/g, '.*');
+        const regex = new RegExp(`^${pattern}$`);
         return regex.test(origin);
       }
       return allowedOrigin === origin;
     });
-    
-    isAllowed ? callback(null, true) : callback(new Error(`Origin ${origin} not allowed`));
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept']
-}));
+  }
+  
+  // Set CORS headers
+  if (isAllowed) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  }
+  
+  // Handle OPTIONS preflight
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
+  next();
+});
 
 // Rate Limiting
 const apiLimiter = rateLimit({
