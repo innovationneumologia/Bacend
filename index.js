@@ -72,18 +72,21 @@ const upload = multer({
 });
 
 // ============ SECURITY MIDDLEWARE ============
-app.use(helmet());
 app.use(cors({
   origin: function(origin, callback) {
-    if (!origin && NODE_ENV === 'development') return callback(null, true);
+    // Allow requests with no origin (like mobile apps, curl, Railway health checks)
+    if (!origin) return callback(null, true);
+    
     const allowedOrigins = [
       'http://localhost:3000',
       'http://localhost:8080',
       'http://127.0.0.1:5500',
       'https://innovationneumologia.github.io',
       'https://*.github.io',
-      'https://backend-neumocare.up.railway.app'
+      'https://backend-neumocare.up.railway.app',
+      'https://bacend-production.up.railway.app' // Add your Railway URL
     ];
+    
     const isAllowed = allowedOrigins.some(allowedOrigin => {
       if (allowedOrigin.includes('*')) {
         const regex = new RegExp('^' + allowedOrigin.replace('*', '.*') + '$');
@@ -91,6 +94,7 @@ app.use(cors({
       }
       return allowedOrigin === origin;
     });
+    
     isAllowed ? callback(null, true) : callback(new Error(`Origin ${origin} not allowed`));
   },
   credentials: true,
@@ -123,6 +127,23 @@ app.use((req, res, next) => {
   const timestamp = new Date().toISOString();
   console.log(`[${timestamp}] ${req.method} ${req.url} - IP: ${req.ip}`);
   next();
+});
+// ============ ROOT ENDPOINT ============
+app.get('/', (req, res) => {
+  res.json({
+    service: 'NeumoCare Hospital Management System API',
+    version: '5.0.0',
+    status: 'operational',
+    environment: NODE_ENV,
+    endpoints: {
+      health: '/health',
+      debug: '/api/debug/tables',
+      auth: '/api/auth/login',
+      docs: 'See /health for full endpoint list'
+    },
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
 });
 
 // ============ UTILITY FUNCTIONS ============
