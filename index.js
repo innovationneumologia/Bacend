@@ -1,5 +1,5 @@
 // ============ NEUMOCARE HOSPITAL MANAGEMENT SYSTEM API ============
-// VERSION 3.0 - COMPATIBLE WITH SUPABASE DATABASE STRUCTURE
+// VERSION 4.0 - PROPER SUPABASE SYNTAX WITH EXACT DATABASE MATCHING
 // =================================================================
 
 const express = require('express');
@@ -24,7 +24,6 @@ const {
   NODE_ENV = 'development'
 } = process.env;
 
-// Validate required environment variables
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   console.error('Missing required environment variables: SUPABASE_URL, SUPABASE_SERVICE_KEY');
   process.exit(1);
@@ -32,31 +31,8 @@ if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
 
 // ============ SUPABASE CLIENT ============
 const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
-  auth: {
-    autoRefreshToken: false,
-    persistSession: false
-  }
+  auth: { autoRefreshToken: false, persistSession: false }
 });
-
-// ============ TABLE NAMES CONFIGURATION ============
-const TABLE_NAMES = {
-    USERS: 'app_users',
-    MEDICAL_STAFF: 'medical_staff',
-    DEPARTMENTS: 'departments',
-    CLINICAL_UNITS: 'clinical_units',
-    TRAINING_UNITS: 'training_units',
-    RESIDENT_ROTATIONS: 'resident_rotations',
-    STAFF_ABSENCES: 'leave_requests',
-    ONCALL_SCHEDULE: 'oncall_schedule',
-    ANNOUNCEMENTS: 'department_announcements',
-    DAILY_ASSIGNMENTS: 'daily_assignments',
-    AUDIT_LOGS: 'audit_logs',
-    SYSTEM_AUDIT_LOG: 'system_audit_log',
-    SYSTEM_SETTINGS: 'system_settings',
-    NOTIFICATIONS: 'notifications',
-    SYSTEM_ROLES: 'system_roles',
-    SYSTEM_PERMISSIONS: 'system_permissions'
-};
 
 // ============ SECURITY MIDDLEWARE ============
 app.use(helmet({
@@ -67,11 +43,7 @@ app.use(helmet({
       scriptSrc: ["'self'"]
     }
   },
-  hsts: {
-    maxAge: 31536000,
-    includeSubDomains: true,
-    preload: true
-  }
+  hsts: { maxAge: 31536000, includeSubDomains: true, preload: true }
 }));
 
 const allowedOrigins = [
@@ -84,19 +56,14 @@ const allowedOrigins = [
   'https://*.netlify.app',
   'https://*.railway.app',
   'https://innovationneumologia.github.io/Neumocare-Hospital-Management/',
-  'https://bacend-production.up.railway.app',
-  'http://bacend-production.up.railway.app',
+  'https://backend-neumocare.up.railway.app',
+  'http://backend-neumocare.up.railway.app',
   ...(process.env.NODE_ENV === 'development' ? ['*'] : [])
 ];
 
 app.use(cors({
   origin: function(origin, callback) {
-    if (!origin) return callback(null, true);
-    
-    if (process.env.NODE_ENV === 'development') {
-      console.log('Development mode: Allowing origin:', origin);
-      return callback(null, true);
-    }
+    if (!origin || process.env.NODE_ENV === 'development') return callback(null, true);
     
     const isAllowed = allowedOrigins.some(allowedOrigin => {
       if (allowedOrigin === '*') return true;
@@ -107,12 +74,7 @@ app.use(cors({
       return allowedOrigin === origin;
     });
     
-    if (isAllowed) {
-      callback(null, true);
-    } else {
-      console.log('CORS: Blocked origin:', origin);
-      callback(new Error(`Origin ${origin} not allowed by CORS`));
-    }
+    isAllowed ? callback(null, true) : callback(new Error(`Origin ${origin} not allowed by CORS`));
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
@@ -123,9 +85,7 @@ app.use(cors({
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 100,
-  message: {
-    error: 'Too many requests from this IP, please try again after 15 minutes'
-  },
+  message: { error: 'Too many requests from this IP, please try again after 15 minutes' },
   standardHeaders: true,
   legacyHeaders: false
 });
@@ -133,9 +93,7 @@ const apiLimiter = rateLimit({
 const authLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
   max: process.env.NODE_ENV === 'development' ? 100 : 5,
-  message: {
-    error: 'Too many login attempts, please try again later'
-  },
+  message: { error: 'Too many login attempts, please try again later' },
   skipSuccessfulRequests: true
 });
 
@@ -146,7 +104,6 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use((req, res, next) => {
   const requestId = Date.now().toString(36) + Math.random().toString(36).substr(2);
   req.requestId = requestId;
-  
   console.log(`[${new Date().toISOString()}] [${requestId}] ${req.method} ${req.url}`);
   next();
 });
@@ -159,11 +116,8 @@ const generateId = (prefix) => {
 const formatDate = (dateString) => {
   if (!dateString) return '';
   try {
-    const date = new Date(dateString);
-    return date.toISOString().split('T')[0];
-  } catch {
-    return '';
-  }
+    return new Date(dateString).toISOString().split('T')[0];
+  } catch { return ''; }
 };
 
 const calculateDays = (start, end) => {
@@ -296,7 +250,6 @@ const schemas = {
 // Validation Middleware
 const validate = (schema) => (req, res, next) => {
   const { error, value } = schema.validate(req.body, { abortEarly: false });
-  
   if (error) {
     return res.status(400).json({
       error: 'Validation failed',
@@ -306,7 +259,6 @@ const validate = (schema) => (req, res, next) => {
       }))
     });
   }
-  
   req.validatedData = value;
   next();
 };
@@ -338,89 +290,73 @@ const authenticateToken = (req, res, next) => {
 
 // ============ PERMISSION SYSTEM ============
 const PERMISSIONS = {
-  system_admin: {
-    name: 'System Administrator',
-    permissions: {
-      medical_staff: { create: true, read: true, update: true, delete: true },
-      training_units: { create: true, read: true, update: true, delete: true, assign: true },
-      resident_rotations: { create: true, read: true, update: true, delete: true, extend: true },
-      oncall_schedule: { create: true, read: true, update: true, delete: true },
-      staff_absence: { create: true, read: true, update: true, delete: true },
-      communications: { create: true, read: true, update: true, delete: true },
-      audit: { read: true },
-      system: { read: true, update: true },
-      permissions: { manage: true },
-      placements: { create: true },
-      users: { create: true, read: true, update: true, delete: true }
-    }
-  },
-  department_head: {
-    name: 'Head of Department',
-    permissions: {
-      medical_staff: { create: true, read: true, update: true, delete: false },
-      training_units: { create: true, read: true, update: true, delete: false, assign: true },
-      resident_rotations: { create: true, read: true, update: true, delete: false, extend: true },
-      oncall_schedule: { create: true, read: true, update: true, delete: false },
-      staff_absence: { create: true, read: true, update: true, delete: true },
-      communications: { create: true, read: true, update: true, delete: true },
-      audit: { read: true },
-      system: { read: true, update: false },
-      permissions: { manage: false },
-      placements: { create: true },
-      users: { create: false, read: true, update: true, delete: false }
-    }
-  },
-  resident_manager: {
-    name: 'Resident Manager',
-    permissions: {
-      medical_staff: { create: true, read: true, update: true, delete: false },
-      training_units: { create: true, read: true, update: true, delete: false, assign: true },
-      resident_rotations: { create: true, read: true, update: true, delete: false, extend: true },
-      oncall_schedule: { create: false, read: true, update: false, delete: false },
-      staff_absence: { create: true, read: true, update: false, delete: false },
-      communications: { create: false, read: true, update: false, delete: false },
-      audit: { read: false },
-      system: { read: false, update: false },
-      permissions: { manage: false },
-      placements: { create: true },
-      users: { create: false, read: true, update: false, delete: false }
-    }
-  },
-  attending_physician: {
-    name: 'Attending Physician',
-    permissions: {
-      medical_staff: { create: false, read: true, update: false, delete: false },
-      training_units: { create: false, read: true, update: false, delete: false, assign: false },
-      resident_rotations: { create: false, read: true, update: false, delete: false, extend: false },
-      oncall_schedule: { create: false, read: true, update: false, delete: false },
-      staff_absence: { create: true, read: true, update: false, delete: false },
-      communications: { create: false, read: true, update: false, delete: false },
-      audit: { read: false },
-      system: { read: false, update: false },
-      permissions: { manage: false },
-      placements: { create: false },
-      users: { create: false, read: true, update: false, delete: false }
-    }
-  },
-  viewing_doctor: {
-    name: 'Viewing Doctor',
-    permissions: {
-      medical_staff: { create: false, read: true, update: false, delete: false },
-      training_units: { create: false, read: true, update: false, delete: false, assign: false },
-      resident_rotations: { create: false, read: true, update: false, delete: false, extend: false },
-      oncall_schedule: { create: false, read: true, update: false, delete: false },
-      staff_absence: { create: false, read: true, update: false, delete: false },
-      communications: { create: false, read: true, update: false, delete: false },
-      audit: { read: false },
-      system: { read: false, update: false },
-      permissions: { manage: false },
-      placements: { create: false },
-      users: { create: false, read: true, update: false, delete: false }
-    }
-  }
+  system_admin: { name: 'System Administrator', permissions: {
+    medical_staff: { create: true, read: true, update: true, delete: true },
+    training_units: { create: true, read: true, update: true, delete: true, assign: true },
+    resident_rotations: { create: true, read: true, update: true, delete: true, extend: true },
+    oncall_schedule: { create: true, read: true, update: true, delete: true },
+    staff_absence: { create: true, read: true, update: true, delete: true },
+    communications: { create: true, read: true, update: true, delete: true },
+    audit: { read: true },
+    system: { read: true, update: true },
+    permissions: { manage: true },
+    placements: { create: true },
+    users: { create: true, read: true, update: true, delete: true }
+  }},
+  department_head: { name: 'Head of Department', permissions: {
+    medical_staff: { create: true, read: true, update: true, delete: false },
+    training_units: { create: true, read: true, update: true, delete: false, assign: true },
+    resident_rotations: { create: true, read: true, update: true, delete: false, extend: true },
+    oncall_schedule: { create: true, read: true, update: true, delete: false },
+    staff_absence: { create: true, read: true, update: true, delete: true },
+    communications: { create: true, read: true, update: true, delete: true },
+    audit: { read: true },
+    system: { read: true, update: false },
+    permissions: { manage: false },
+    placements: { create: true },
+    users: { create: false, read: true, update: true, delete: false }
+  }},
+  resident_manager: { name: 'Resident Manager', permissions: {
+    medical_staff: { create: true, read: true, update: true, delete: false },
+    training_units: { create: true, read: true, update: true, delete: false, assign: true },
+    resident_rotations: { create: true, read: true, update: true, delete: false, extend: true },
+    oncall_schedule: { create: false, read: true, update: false, delete: false },
+    staff_absence: { create: true, read: true, update: false, delete: false },
+    communications: { create: false, read: true, update: false, delete: false },
+    audit: { read: false },
+    system: { read: false, update: false },
+    permissions: { manage: false },
+    placements: { create: true },
+    users: { create: false, read: true, update: false, delete: false }
+  }},
+  attending_physician: { name: 'Attending Physician', permissions: {
+    medical_staff: { create: false, read: true, update: false, delete: false },
+    training_units: { create: false, read: true, update: false, delete: false, assign: false },
+    resident_rotations: { create: false, read: true, update: false, delete: false, extend: false },
+    oncall_schedule: { create: false, read: true, update: false, delete: false },
+    staff_absence: { create: true, read: true, update: false, delete: false },
+    communications: { create: false, read: true, update: false, delete: false },
+    audit: { read: false },
+    system: { read: false, update: false },
+    permissions: { manage: false },
+    placements: { create: false },
+    users: { create: false, read: true, update: false, delete: false }
+  }},
+  viewing_doctor: { name: 'Viewing Doctor', permissions: {
+    medical_staff: { create: false, read: true, update: false, delete: false },
+    training_units: { create: false, read: true, update: false, delete: false, assign: false },
+    resident_rotations: { create: false, read: true, update: false, delete: false, extend: false },
+    oncall_schedule: { create: false, read: true, update: false, delete: false },
+    staff_absence: { create: false, read: true, update: false, delete: false },
+    communications: { create: false, read: true, update: false, delete: false },
+    audit: { read: false },
+    system: { read: false, update: false },
+    permissions: { manage: false },
+    placements: { create: false },
+    users: { create: false, read: true, update: false, delete: false }
+  }}
 };
 
-// Permission Middleware
 const checkPermission = (resource, action) => {
   return (req, res, next) => {
     if (!req.user || !req.user.role) {
@@ -466,12 +402,10 @@ const auditLog = async (req, action, resource, details = {}) => {
     };
     
     const { error } = await supabase
-      .from(TABLE_NAMES.AUDIT_LOGS)
+      .from('audit_logs')
       .insert([auditData]);
     
-    if (error) {
-      console.error('Audit log error:', error.message);
-    }
+    if (error) console.error('Audit log error:', error.message);
   } catch (error) {
     console.error('Failed to log audit:', error.message);
   }
@@ -484,7 +418,7 @@ app.get('/health', (req, res) => {
   res.json({
     status: 'healthy',
     service: 'NeumoCare Hospital API',
-    version: '3.0.0',
+    version: '4.0.0',
     timestamp: new Date().toISOString(),
     environment: NODE_ENV,
     uptime: process.uptime(),
@@ -497,7 +431,7 @@ app.post('/api/auth/login', authLimiter, validate(schemas.login), async (req, re
   try {
     const { email, password } = req.validatedData;
     
-    // Demo admin account (for testing)
+    // Demo admin account
     if (email === 'admin@neumocare.org' && password === 'password123') {
       const token = jwt.sign(
         { 
@@ -523,7 +457,7 @@ app.post('/api/auth/login', authLimiter, validate(schemas.login), async (req, re
     
     // Database user lookup
     const { data: user, error } = await supabase
-      .from(TABLE_NAMES.USERS)
+      .from('app_users')
       .select('id, email, full_name, user_role, department_id, password_hash, account_status')
       .eq('email', email.toLowerCase())
       .single();
@@ -553,22 +487,13 @@ app.post('/api/auth/login', authLimiter, validate(schemas.login), async (req, re
     
     // Generate JWT
     const token = jwt.sign(
-      {
-        id: user.id,
-        email: user.email,
-        role: user.user_role
-      },
+      { id: user.id, email: user.email, role: user.user_role },
       JWT_SECRET,
       { expiresIn: '24h' }
     );
     
-    // Remove password hash from response
     const { password_hash, ...userWithoutPassword } = user;
-    
-    res.json({
-      token,
-      user: userWithoutPassword
-    });
+    res.json({ token, user: userWithoutPassword });
     
   } catch (error) {
     console.error('Login error:', error);
@@ -589,13 +514,12 @@ app.post('/api/auth/logout', authenticateToken, async (req, res) => {
 app.get('/api/users/profile', authenticateToken, async (req, res) => {
   try {
     const { data: user, error } = await supabase
-      .from(TABLE_NAMES.USERS)
+      .from('app_users')
       .select('id, email, full_name, user_role, department_id, phone_number, notifications_enabled, absence_notifications, announcement_notifications, created_at')
       .eq('id', req.user.id)
       .single();
     
     if (error) throw error;
-    
     res.json(user);
   } catch (error) {
     console.error('Profile error:', error);
@@ -615,14 +539,13 @@ app.put('/api/users/profile', authenticateToken, validate(schemas.userProfile), 
     };
     
     const { data, error } = await supabase
-      .from(TABLE_NAMES.USERS)
+      .from('app_users')
       .update(updateData)
       .eq('id', req.user.id)
       .select()
       .single();
     
     if (error) throw error;
-    
     res.json(data);
   } catch (error) {
     console.error('Update profile error:', error);
@@ -633,27 +556,14 @@ app.put('/api/users/profile', authenticateToken, validate(schemas.userProfile), 
 // ===== MEDICAL STAFF =====
 app.get('/api/medical-staff', authenticateToken, checkPermission('medical_staff', 'read'), apiLimiter, async (req, res) => {
   try {
-    const { 
-      search, 
-      staff_type, 
-      employment_status, 
-      department_id,
-      page = 1,
-      limit = 20
-    } = req.query;
-    
+    const { search, staff_type, employment_status, department_id, page = 1, limit = 20 } = req.query;
     const offset = (page - 1) * limit;
     
     let query = supabase
-      .from(TABLE_NAMES.MEDICAL_STAFF)
-      .select(`
-        *,
-        department:departments(name, code)
-      `, { count: 'exact' });
+      .from('medical_staff')
+      .select('*, departments!medical_staff_department_id_fkey(name, code)', { count: 'exact' });
     
-    if (search) {
-      query = query.or(`full_name.ilike.%${search}%,staff_id.ilike.%${search}%,professional_email.ilike.%${search}%`);
-    }
+    if (search) query = query.or(`full_name.ilike.%${search}%,staff_id.ilike.%${search}%,professional_email.ilike.%${search}%`);
     if (staff_type) query = query.eq('staff_type', staff_type);
     if (employment_status) query = query.eq('employment_status', employment_status);
     if (department_id) query = query.eq('department_id', department_id);
@@ -661,11 +571,16 @@ app.get('/api/medical-staff', authenticateToken, checkPermission('medical_staff'
     query = query.order('full_name').range(offset, offset + limit - 1);
     
     const { data, error, count } = await query;
-    
     if (error) throw error;
     
+    // Transform response to match frontend expectations
+    const transformedData = data.map(item => ({
+      ...item,
+      department: item.departments ? { name: item.departments.name, code: item.departments.code } : null
+    }));
+    
     res.json({
-      data: data || [],
+      data: transformedData,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -682,22 +597,23 @@ app.get('/api/medical-staff', authenticateToken, checkPermission('medical_staff'
 app.get('/api/medical-staff/:id', authenticateToken, checkPermission('medical_staff', 'read'), async (req, res) => {
   try {
     const { data, error } = await supabase
-      .from(TABLE_NAMES.MEDICAL_STAFF)
-      .select(`
-        *,
-        department:departments(name, code)
-      `)
+      .from('medical_staff')
+      .select('*, departments!medical_staff_department_id_fkey(name, code)')
       .eq('id', req.params.id)
       .single();
     
     if (error) {
-      if (error.code === 'PGRST116') {
-        return res.status(404).json({ error: 'Medical staff not found' });
-      }
+      if (error.code === 'PGRST116') return res.status(404).json({ error: 'Medical staff not found' });
       throw error;
     }
     
-    res.json(data);
+    // Transform response
+    const transformed = {
+      ...data,
+      department: data.departments ? { name: data.departments.name, code: data.departments.code } : null
+    };
+    
+    res.json(transformed);
   } catch (error) {
     console.error('Medical staff details error:', error);
     res.status(500).json({ error: 'Failed to fetch staff details' });
@@ -714,7 +630,7 @@ app.post('/api/medical-staff', authenticateToken, checkPermission('medical_staff
     };
     
     const { data, error } = await supabase
-      .from(TABLE_NAMES.MEDICAL_STAFF)
+      .from('medical_staff')
       .insert([staffData])
       .select()
       .single();
@@ -725,14 +641,12 @@ app.post('/api/medical-staff', authenticateToken, checkPermission('medical_staff
     res.status(201).json(data);
   } catch (error) {
     console.error('Create medical staff error:', error);
-    
     if (error.code === '23505') {
       return res.status(409).json({ 
         error: 'Duplicate entry',
         message: 'A staff member with this email or staff ID already exists'
       });
     }
-    
     res.status(500).json({ error: 'Failed to create medical staff' });
   }
 });
@@ -745,16 +659,14 @@ app.put('/api/medical-staff/:id', authenticateToken, checkPermission('medical_st
     };
     
     const { data, error } = await supabase
-      .from(TABLE_NAMES.MEDICAL_STAFF)
+      .from('medical_staff')
       .update(staffData)
       .eq('id', req.params.id)
       .select()
       .single();
     
     if (error) {
-      if (error.code === 'PGRST116') {
-        return res.status(404).json({ error: 'Medical staff not found' });
-      }
+      if (error.code === 'PGRST116') return res.status(404).json({ error: 'Medical staff not found' });
       throw error;
     }
     
@@ -768,9 +680,8 @@ app.put('/api/medical-staff/:id', authenticateToken, checkPermission('medical_st
 
 app.delete('/api/medical-staff/:id', authenticateToken, checkPermission('medical_staff', 'delete'), async (req, res) => {
   try {
-    // Soft delete by setting status to inactive
     const { data, error } = await supabase
-      .from(TABLE_NAMES.MEDICAL_STAFF)
+      .from('medical_staff')
       .update({ 
         employment_status: 'inactive',
         updated_at: new Date().toISOString()
@@ -796,16 +707,22 @@ app.delete('/api/medical-staff/:id', authenticateToken, checkPermission('medical
 app.get('/api/departments', authenticateToken, apiLimiter, async (req, res) => {
   try {
     const { data, error } = await supabase
-      .from(TABLE_NAMES.DEPARTMENTS)
-      .select(`
-        *,
-        head_of_department:medical_staff!departments_head_of_department_id_fkey(full_name, professional_email)
-      `)
+      .from('departments')
+      .select('*, medical_staff!departments_head_of_department_id_fkey(full_name, professional_email)')
       .order('name');
     
     if (error) throw error;
     
-    res.json(data || []);
+    // Transform response
+    const transformedData = data.map(item => ({
+      ...item,
+      head_of_department: item.medical_staff ? { 
+        full_name: item.medical_staff.full_name, 
+        professional_email: item.medical_staff.professional_email 
+      } : null
+    }));
+    
+    res.json(transformedData);
   } catch (error) {
     console.error('Departments error:', error);
     res.status(500).json({ error: 'Failed to fetch departments' });
@@ -815,23 +732,27 @@ app.get('/api/departments', authenticateToken, apiLimiter, async (req, res) => {
 app.get('/api/departments/:id', authenticateToken, async (req, res) => {
   try {
     const { data, error } = await supabase
-      .from(TABLE_NAMES.DEPARTMENTS)
-      .select(`
-        *,
-        head_of_department:medical_staff!departments_head_of_department_id_fkey(full_name, professional_email, staff_type),
-        medical_staff:medical_staff(*)
-      `)
+      .from('departments')
+      .select('*, medical_staff!departments_head_of_department_id_fkey(full_name, professional_email, staff_type)')
       .eq('id', req.params.id)
       .single();
     
     if (error) {
-      if (error.code === 'PGRST116') {
-        return res.status(404).json({ error: 'Department not found' });
-      }
+      if (error.code === 'PGRST116') return res.status(404).json({ error: 'Department not found' });
       throw error;
     }
     
-    res.json(data);
+    // Transform response
+    const transformed = {
+      ...data,
+      head_of_department: data.medical_staff ? { 
+        full_name: data.medical_staff.full_name, 
+        professional_email: data.medical_staff.professional_email,
+        staff_type: data.medical_staff.staff_type
+      } : null
+    };
+    
+    res.json(transformed);
   } catch (error) {
     console.error('Department details error:', error);
     res.status(500).json({ error: 'Failed to fetch department details' });
@@ -847,7 +768,7 @@ app.post('/api/departments', authenticateToken, checkPermission('system', 'updat
     };
     
     const { data, error } = await supabase
-      .from(TABLE_NAMES.DEPARTMENTS)
+      .from('departments')
       .insert([deptData])
       .select()
       .single();
@@ -870,16 +791,14 @@ app.put('/api/departments/:id', authenticateToken, checkPermission('system', 'up
     };
     
     const { data, error } = await supabase
-      .from(TABLE_NAMES.DEPARTMENTS)
+      .from('departments')
       .update(deptData)
       .eq('id', req.params.id)
       .select()
       .single();
     
     if (error) {
-      if (error.code === 'PGRST116') {
-        return res.status(404).json({ error: 'Department not found' });
-      }
+      if (error.code === 'PGRST116') return res.status(404).json({ error: 'Department not found' });
       throw error;
     }
     
@@ -897,22 +816,27 @@ app.get('/api/training-units', authenticateToken, async (req, res) => {
     const { department_id, unit_status } = req.query;
     
     let query = supabase
-      .from(TABLE_NAMES.TRAINING_UNITS)
-      .select(`
-        *,
-        department:departments(name, code),
-        supervisor:medical_staff(full_name, professional_email)
-      `)
+      .from('training_units')
+      .select('*, departments!training_units_department_id_fkey(name, code), medical_staff!training_units_supervisor_id_fkey(full_name, professional_email)')
       .order('unit_name');
     
     if (department_id) query = query.eq('department_id', department_id);
     if (unit_status) query = query.eq('unit_status', unit_status);
     
     const { data, error } = await query;
-    
     if (error) throw error;
     
-    res.json(data || []);
+    // Transform response
+    const transformedData = data.map(item => ({
+      ...item,
+      department: item.departments ? { name: item.departments.name, code: item.departments.code } : null,
+      supervisor: item.medical_staff ? { 
+        full_name: item.medical_staff.full_name, 
+        professional_email: item.medical_staff.professional_email 
+      } : null
+    }));
+    
+    res.json(transformedData);
   } catch (error) {
     console.error('Training units error:', error);
     res.status(500).json({ error: 'Failed to fetch training units' });
@@ -922,23 +846,27 @@ app.get('/api/training-units', authenticateToken, async (req, res) => {
 app.get('/api/training-units/:id', authenticateToken, async (req, res) => {
   try {
     const { data, error } = await supabase
-      .from(TABLE_NAMES.TRAINING_UNITS)
-      .select(`
-        *,
-        department:departments(name, code),
-        supervisor:medical_staff(full_name, professional_email)
-      `)
+      .from('training_units')
+      .select('*, departments!training_units_department_id_fkey(name, code), medical_staff!training_units_supervisor_id_fkey(full_name, professional_email)')
       .eq('id', req.params.id)
       .single();
     
     if (error) {
-      if (error.code === 'PGRST116') {
-        return res.status(404).json({ error: 'Training unit not found' });
-      }
+      if (error.code === 'PGRST116') return res.status(404).json({ error: 'Training unit not found' });
       throw error;
     }
     
-    res.json(data);
+    // Transform response
+    const transformed = {
+      ...data,
+      department: data.departments ? { name: data.departments.name, code: data.departments.code } : null,
+      supervisor: data.medical_staff ? { 
+        full_name: data.medical_staff.full_name, 
+        professional_email: data.medical_staff.professional_email 
+      } : null
+    };
+    
+    res.json(transformed);
   } catch (error) {
     console.error('Training unit details error:', error);
     res.status(500).json({ error: 'Failed to fetch training unit details' });
@@ -954,7 +882,7 @@ app.post('/api/training-units', authenticateToken, checkPermission('training_uni
     };
     
     const { data, error } = await supabase
-      .from(TABLE_NAMES.TRAINING_UNITS)
+      .from('training_units')
       .insert([unitData])
       .select()
       .single();
@@ -977,16 +905,14 @@ app.put('/api/training-units/:id', authenticateToken, checkPermission('training_
     };
     
     const { data, error } = await supabase
-      .from(TABLE_NAMES.TRAINING_UNITS)
+      .from('training_units')
       .update(unitData)
       .eq('id', req.params.id)
       .select()
       .single();
     
     if (error) {
-      if (error.code === 'PGRST116') {
-        return res.status(404).json({ error: 'Training unit not found' });
-      }
+      if (error.code === 'PGRST116') return res.status(404).json({ error: 'Training unit not found' });
       throw error;
     }
     
@@ -1001,26 +927,12 @@ app.put('/api/training-units/:id', authenticateToken, checkPermission('training_
 // ===== RESIDENT ROTATIONS =====
 app.get('/api/rotations', authenticateToken, async (req, res) => {
   try {
-    const { 
-      resident_id, 
-      rotation_status, 
-      training_unit_id,
-      start_date,
-      end_date,
-      page = 1,
-      limit = 20
-    } = req.query;
-    
+    const { resident_id, rotation_status, training_unit_id, start_date, end_date, page = 1, limit = 20 } = req.query;
     const offset = (page - 1) * limit;
     
     let query = supabase
-      .from(TABLE_NAMES.RESIDENT_ROTATIONS)
-      .select(`
-        *,
-        resident:medical_staff!resident_rotations_resident_id_fkey(full_name, professional_email, staff_type),
-        supervising_attending:medical_staff!resident_rotations_supervising_attending_id_fkey(full_name, professional_email),
-        training_unit:training_units(unit_name, unit_code)
-      `, { count: 'exact' });
+      .from('resident_rotations')
+      .select('*, medical_staff!resident_rotations_resident_id_fkey(full_name, professional_email, staff_type), medical_staff!resident_rotations_supervising_attending_id_fkey(full_name, professional_email), training_units(unit_name, unit_code)', { count: 'exact' });
     
     if (resident_id) query = query.eq('resident_id', resident_id);
     if (rotation_status) query = query.eq('rotation_status', rotation_status);
@@ -1031,11 +943,28 @@ app.get('/api/rotations', authenticateToken, async (req, res) => {
     query = query.order('start_date', { ascending: false }).range(offset, offset + limit - 1);
     
     const { data, error, count } = await query;
-    
     if (error) throw error;
     
+    // Transform response
+    const transformedData = data.map(item => ({
+      ...item,
+      resident: item.medical_staff ? {
+        full_name: item.medical_staff.full_name,
+        professional_email: item.medical_staff.professional_email,
+        staff_type: item.medical_staff.staff_type
+      } : null,
+      supervising_attending: item.medical_staff_2 ? {
+        full_name: item.medical_staff_2.full_name,
+        professional_email: item.medical_staff_2.professional_email
+      } : null,
+      training_unit: item.training_units ? {
+        unit_name: item.training_units.unit_name,
+        unit_code: item.training_units.unit_code
+      } : null
+    }));
+    
     res.json({
-      data: data || [],
+      data: transformedData,
       pagination: {
         page: parseInt(page),
         limit: parseInt(limit),
@@ -1059,7 +988,7 @@ app.post('/api/rotations', authenticateToken, checkPermission('resident_rotation
     };
     
     const { data, error } = await supabase
-      .from(TABLE_NAMES.RESIDENT_ROTATIONS)
+      .from('resident_rotations')
       .insert([rotationData])
       .select()
       .single();
@@ -1082,16 +1011,14 @@ app.put('/api/rotations/:id', authenticateToken, checkPermission('resident_rotat
     };
     
     const { data, error } = await supabase
-      .from(TABLE_NAMES.RESIDENT_ROTATIONS)
+      .from('resident_rotations')
       .update(rotationData)
       .eq('id', req.params.id)
       .select()
       .single();
     
     if (error) {
-      if (error.code === 'PGRST116') {
-        return res.status(404).json({ error: 'Rotation not found' });
-      }
+      if (error.code === 'PGRST116') return res.status(404).json({ error: 'Rotation not found' });
       throw error;
     }
     
@@ -1106,7 +1033,7 @@ app.put('/api/rotations/:id', authenticateToken, checkPermission('resident_rotat
 app.delete('/api/rotations/:id', authenticateToken, checkPermission('resident_rotations', 'delete'), async (req, res) => {
   try {
     const { error } = await supabase
-      .from(TABLE_NAMES.RESIDENT_ROTATIONS)
+      .from('resident_rotations')
       .update({
         rotation_status: 'cancelled',
         updated_at: new Date().toISOString()
@@ -1129,25 +1056,33 @@ app.get('/api/oncall', authenticateToken, apiLimiter, async (req, res) => {
     const { start_date, end_date, physician_id } = req.query;
     
     let query = supabase
-      .from(TABLE_NAMES.ONCALL_SCHEDULE)
-      .select(`
-        *,
-        primary_physician:medical_staff!oncall_schedule_primary_physician_id_fkey(full_name, professional_email, mobile_phone),
-        backup_physician:medical_staff!oncall_schedule_backup_physician_id_fkey(full_name, professional_email, mobile_phone)
-      `)
+      .from('oncall_schedule')
+      .select('*, medical_staff!oncall_schedule_primary_physician_id_fkey(full_name, professional_email, mobile_phone), medical_staff!oncall_schedule_backup_physician_id_fkey(full_name, professional_email, mobile_phone)')
       .order('duty_date');
     
     if (start_date) query = query.gte('duty_date', start_date);
     if (end_date) query = query.lte('duty_date', end_date);
-    if (physician_id) {
-      query = query.or(`primary_physician_id.eq.${physician_id},backup_physician_id.eq.${physician_id}`);
-    }
+    if (physician_id) query = query.or(`primary_physician_id.eq.${physician_id},backup_physician_id.eq.${physician_id}`);
     
     const { data, error } = await query;
-    
     if (error) throw error;
     
-    res.json(data || []);
+    // Transform response
+    const transformedData = data.map(item => ({
+      ...item,
+      primary_physician: item.medical_staff ? {
+        full_name: item.medical_staff.full_name,
+        professional_email: item.medical_staff.professional_email,
+        mobile_phone: item.medical_staff.mobile_phone
+      } : null,
+      backup_physician: item.medical_staff_2 ? {
+        full_name: item.medical_staff_2.full_name,
+        professional_email: item.medical_staff_2.professional_email,
+        mobile_phone: item.medical_staff_2.mobile_phone
+      } : null
+    }));
+    
+    res.json(transformedData);
   } catch (error) {
     console.error('On-call schedule error:', error);
     res.status(500).json({ error: 'Failed to fetch on-call schedule' });
@@ -1165,7 +1100,7 @@ app.post('/api/oncall', authenticateToken, checkPermission('oncall_schedule', 'c
     };
     
     const { data, error } = await supabase
-      .from(TABLE_NAMES.ONCALL_SCHEDULE)
+      .from('oncall_schedule')
       .insert([scheduleData])
       .select()
       .single();
@@ -1188,16 +1123,14 @@ app.put('/api/oncall/:id', authenticateToken, checkPermission('oncall_schedule',
     };
     
     const { data, error } = await supabase
-      .from(TABLE_NAMES.ONCALL_SCHEDULE)
+      .from('oncall_schedule')
       .update(scheduleData)
       .eq('id', req.params.id)
       .select()
       .single();
     
     if (error) {
-      if (error.code === 'PGRST116') {
-        return res.status(404).json({ error: 'Schedule not found' });
-      }
+      if (error.code === 'PGRST116') return res.status(404).json({ error: 'Schedule not found' });
       throw error;
     }
     
@@ -1212,7 +1145,7 @@ app.put('/api/oncall/:id', authenticateToken, checkPermission('oncall_schedule',
 app.delete('/api/oncall/:id', authenticateToken, checkPermission('oncall_schedule', 'delete'), async (req, res) => {
   try {
     const { error } = await supabase
-      .from(TABLE_NAMES.ONCALL_SCHEDULE)
+      .from('oncall_schedule')
       .delete()
       .eq('id', req.params.id);
     
@@ -1232,12 +1165,8 @@ app.get('/api/absences', authenticateToken, async (req, res) => {
     const { staff_member_id, approval_status, start_date, end_date } = req.query;
     
     let query = supabase
-      .from(TABLE_NAMES.STAFF_ABSENCES)
-      .select(`
-        *,
-        staff_member:medical_staff!leave_requests_staff_member_id_fkey(full_name, professional_email, department_id),
-        reviewed_by_user:app_users!leave_requests_reviewed_by_fkey(full_name, email)
-      `)
+      .from('leave_requests')
+      .select('*, medical_staff!leave_requests_staff_member_id_fkey(full_name, professional_email, department_id), app_users!leave_requests_reviewed_by_fkey(full_name, email)')
       .order('leave_start_date');
     
     if (staff_member_id) query = query.eq('staff_member_id', staff_member_id);
@@ -1246,10 +1175,23 @@ app.get('/api/absences', authenticateToken, async (req, res) => {
     if (end_date) query = query.lte('leave_end_date', end_date);
     
     const { data, error } = await query;
-    
     if (error) throw error;
     
-    res.json(data || []);
+    // Transform response
+    const transformedData = data.map(item => ({
+      ...item,
+      staff_member: item.medical_staff ? {
+        full_name: item.medical_staff.full_name,
+        professional_email: item.medical_staff.professional_email,
+        department_id: item.medical_staff.department_id
+      } : null,
+      reviewed_by_user: item.app_users ? {
+        full_name: item.app_users.full_name,
+        email: item.app_users.email
+      } : null
+    }));
+    
+    res.json(transformedData);
   } catch (error) {
     console.error('Absences error:', error);
     res.status(500).json({ error: 'Failed to fetch absences' });
@@ -1267,7 +1209,7 @@ app.post('/api/absences', authenticateToken, checkPermission('staff_absence', 'c
     };
     
     const { data, error } = await supabase
-      .from(TABLE_NAMES.STAFF_ABSENCES)
+      .from('leave_requests')
       .insert([absenceData])
       .select()
       .single();
@@ -1291,16 +1233,14 @@ app.put('/api/absences/:id', authenticateToken, checkPermission('staff_absence',
     };
     
     const { data, error } = await supabase
-      .from(TABLE_NAMES.STAFF_ABSENCES)
+      .from('leave_requests')
       .update(absenceData)
       .eq('id', req.params.id)
       .select()
       .single();
     
     if (error) {
-      if (error.code === 'PGRST116') {
-        return res.status(404).json({ error: 'Absence record not found' });
-      }
+      if (error.code === 'PGRST116') return res.status(404).json({ error: 'Absence record not found' });
       throw error;
     }
     
@@ -1325,7 +1265,7 @@ app.put('/api/absences/:id/approve', authenticateToken, checkPermission('staff_a
     };
     
     const { data, error } = await supabase
-      .from(TABLE_NAMES.STAFF_ABSENCES)
+      .from('leave_requests')
       .update(updateData)
       .eq('id', req.params.id)
       .select()
@@ -1351,18 +1291,24 @@ app.get('/api/announcements', authenticateToken, apiLimiter, async (req, res) =>
     const today = formatDate(new Date());
     
     const { data, error } = await supabase
-      .from(TABLE_NAMES.ANNOUNCEMENTS)
-      .select(`
-        *,
-        created_by_user:app_users!department_announcements_created_by_fkey(full_name, email)
-      `)
+      .from('department_announcements')
+      .select('*, app_users!department_announcements_created_by_fkey(full_name, email)')
       .lte('publish_start_date', today)
       .or(`publish_end_date.gte.${today},publish_end_date.is.null`)
       .order('publish_start_date', { ascending: false });
     
     if (error) throw error;
     
-    res.json(data || []);
+    // Transform response
+    const transformedData = data.map(item => ({
+      ...item,
+      created_by_user: item.app_users ? {
+        full_name: item.app_users.full_name,
+        email: item.app_users.email
+      } : null
+    }));
+    
+    res.json(transformedData);
   } catch (error) {
     console.error('Announcements error:', error);
     res.status(500).json({ error: 'Failed to fetch announcements' });
@@ -1381,7 +1327,7 @@ app.post('/api/announcements', authenticateToken, checkPermission('communication
     };
     
     const { data, error } = await supabase
-      .from(TABLE_NAMES.ANNOUNCEMENTS)
+      .from('department_announcements')
       .insert([announcementData])
       .select()
       .single();
@@ -1399,7 +1345,7 @@ app.post('/api/announcements', authenticateToken, checkPermission('communication
 app.delete('/api/announcements/:id', authenticateToken, checkPermission('communications', 'delete'), async (req, res) => {
   try {
     const { error } = await supabase
-      .from(TABLE_NAMES.ANNOUNCEMENTS)
+      .from('department_announcements')
       .delete()
       .eq('id', req.params.id);
     
@@ -1425,11 +1371,11 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
       { count: todayOnCall },
       { count: pendingAbsences }
     ] = await Promise.all([
-      supabase.from(TABLE_NAMES.MEDICAL_STAFF).select('*', { count: 'exact', head: true }),
-      supabase.from(TABLE_NAMES.MEDICAL_STAFF).select('*', { count: 'exact', head: true }).eq('employment_status', 'active'),
-      supabase.from(TABLE_NAMES.MEDICAL_STAFF).select('*', { count: 'exact', head: true }).eq('staff_type', 'medical_resident').eq('employment_status', 'active'),
-      supabase.from(TABLE_NAMES.ONCALL_SCHEDULE).select('*', { count: 'exact', head: true }).eq('duty_date', today),
-      supabase.from(TABLE_NAMES.STAFF_ABSENCES).select('*', { count: 'exact', head: true }).eq('approval_status', 'pending')
+      supabase.from('medical_staff').select('*', { count: 'exact', head: true }),
+      supabase.from('medical_staff').select('*', { count: 'exact', head: true }).eq('employment_status', 'active'),
+      supabase.from('medical_staff').select('*', { count: 'exact', head: true }).eq('staff_type', 'medical_resident').eq('employment_status', 'active'),
+      supabase.from('oncall_schedule').select('*', { count: 'exact', head: true }).eq('duty_date', today),
+      supabase.from('leave_requests').select('*', { count: 'exact', head: true }).eq('approval_status', 'pending')
     ]);
     
     res.json({
@@ -1450,7 +1396,7 @@ app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
 app.get('/api/settings', authenticateToken, async (req, res) => {
   try {
     const { data, error } = await supabase
-      .from(TABLE_NAMES.SYSTEM_SETTINGS)
+      .from('system_settings')
       .select('*')
       .limit(1)
       .single();
@@ -1480,7 +1426,7 @@ app.get('/api/settings', authenticateToken, async (req, res) => {
 app.put('/api/settings', authenticateToken, checkPermission('system', 'update'), validate(schemas.systemSettings), async (req, res) => {
   try {
     const { data, error } = await supabase
-      .from(TABLE_NAMES.SYSTEM_SETTINGS)
+      .from('system_settings')
       .upsert([req.validatedData])
       .select()
       .single();
@@ -1499,23 +1445,19 @@ app.put('/api/settings', authenticateToken, checkPermission('system', 'update'),
 app.get('/api/users', authenticateToken, checkPermission('users', 'read'), async (req, res) => {
   try {
     const { data, error } = await supabase
-      .from(TABLE_NAMES.USERS)
-      .select(`
-        id,
-        email,
-        full_name,
-        user_role,
-        department_id,
-        phone_number,
-        account_status,
-        created_at,
-        departments(name)
-      `)
+      .from('app_users')
+      .select('id, email, full_name, user_role, department_id, phone_number, account_status, created_at, departments!app_users_department_id_fkey(name)')
       .order('full_name');
     
     if (error) throw error;
     
-    res.json(data || []);
+    // Transform response
+    const transformedData = data.map(item => ({
+      ...item,
+      departments: item.departments ? { name: item.departments.name } : null
+    }));
+    
+    res.json(transformedData);
   } catch (error) {
     console.error('Users error:', error);
     res.status(500).json({ error: 'Failed to fetch users' });
@@ -1526,7 +1468,7 @@ app.get('/api/users', authenticateToken, checkPermission('users', 'read'), async
 app.get('/api/notifications', authenticateToken, async (req, res) => {
   try {
     const { data, error } = await supabase
-      .from(TABLE_NAMES.NOTIFICATIONS)
+      .from('notifications')
       .select('*')
       .eq('user_id', req.user.id)
       .eq('read', false)
@@ -1534,7 +1476,6 @@ app.get('/api/notifications', authenticateToken, async (req, res) => {
       .limit(20);
     
     if (error) throw error;
-    
     res.json(data || []);
   } catch (error) {
     console.error('Notifications error:', error);
@@ -1546,10 +1487,10 @@ app.get('/api/notifications', authenticateToken, async (req, res) => {
 app.get('/api/available-data', authenticateToken, async (req, res) => {
   try {
     const [departments, residents, attendings, trainingUnits] = await Promise.all([
-      supabase.from(TABLE_NAMES.DEPARTMENTS).select('id, name, code').eq('status', 'active').order('name'),
-      supabase.from(TABLE_NAMES.MEDICAL_STAFF).select('id, full_name, training_year').eq('staff_type', 'medical_resident').eq('employment_status', 'active').order('full_name'),
-      supabase.from(TABLE_NAMES.MEDICAL_STAFF).select('id, full_name, specialization').eq('staff_type', 'attending_physician').eq('employment_status', 'active').order('full_name'),
-      supabase.from(TABLE_NAMES.TRAINING_UNITS).select('id, unit_name, unit_code, maximum_residents').eq('unit_status', 'active').order('unit_name')
+      supabase.from('departments').select('id, name, code').eq('status', 'active').order('name'),
+      supabase.from('medical_staff').select('id, full_name, training_year').eq('staff_type', 'medical_resident').eq('employment_status', 'active').order('full_name'),
+      supabase.from('medical_staff').select('id, full_name, specialization').eq('staff_type', 'attending_physician').eq('employment_status', 'active').order('full_name'),
+      supabase.from('training_units').select('id, unit_name, unit_code, maximum_residents').eq('unit_status', 'active').order('unit_name')
     ]);
     
     res.json({
@@ -1565,7 +1506,6 @@ app.get('/api/available-data', authenticateToken, async (req, res) => {
 });
 
 // ============ ERROR HANDLING ============
-// 404 Handler
 app.use('*', (req, res) => {
   res.status(404).json({
     error: 'Endpoint not found',
@@ -1586,7 +1526,6 @@ app.use('*', (req, res) => {
   });
 });
 
-// Global Error Handler
 app.use((err, req, res, next) => {
   console.error(`[${new Date().toISOString()}] [${req.requestId || 'unknown'}] Error:`, {
     message: err.message,
@@ -1596,17 +1535,10 @@ app.use((err, req, res, next) => {
     user: req.user?.id
   });
   
-  if (err.message?.includes('JWT')) {
+  if (err.message?.includes('JWT') || err.name === 'JsonWebTokenError') {
     return res.status(401).json({ 
       error: 'Authentication error',
       message: 'Invalid or expired authentication token' 
-    });
-  }
-  
-  if (err.name === 'JsonWebTokenError') {
-    return res.status(401).json({ 
-      error: 'Invalid token',
-      message: 'Authentication token is invalid' 
     });
   }
   
@@ -1638,7 +1570,6 @@ const server = app.listen(PORT, () => {
   `);
 });
 
-// Graceful shutdown
 process.on('SIGTERM', () => {
   console.log('SIGTERM signal received: closing HTTP server');
   server.close(() => {
