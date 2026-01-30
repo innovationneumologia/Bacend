@@ -37,24 +37,19 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
 });
 
 // ============ CORS CONFIGURATION ============
-// Replace the entire CORS section in your backend with this:
-
-// ============ CORS CONFIGURATION ============
-const cors = require('cors');
+const cors = require('cors');  // KEEP THIS LINE (ONLY ONCE!)
 
 const allowedOrigins = [
     'https://innovationneumologia.github.io',
-    'https://innovationneumologia.github.io/',
     'https://*.github.io',
     'http://localhost:3000',
     'http://localhost:8080',
-    'http://localhost:5500',
-    'http://127.0.0.1:5500'
+    'http://localhost:5500'
 ];
 
 const corsOptions = {
     origin: function (origin, callback) {
-        // Allow requests with no origin (like mobile apps or curl requests)
+        // Allow requests with no origin
         if (!origin) return callback(null, true);
         
         // Check if origin is in allowed list
@@ -76,15 +71,14 @@ const corsOptions = {
     },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'x-fallback-token'],
-    exposedHeaders: ['Content-Range', 'X-Content-Range'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
     maxAge: 86400
 };
 
 // Apply CORS middleware
 app.use(cors(corsOptions));
 
-// Handle pre-flight requests for all routes
+// Handle pre-flight requests
 app.options('*', cors(corsOptions));
 
 // Rate limiting
