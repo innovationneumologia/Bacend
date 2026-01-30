@@ -36,50 +36,50 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
 });
 
 // ============ CORS CONFIGURATION ============
-const cors = require('cors');  // KEEP THIS LINE (ONLY ONCE!)
-
-const allowedOrigins = [
+app.use((req, res, next) => {
+  const origin = req.headers.origin;
+  
+  // Allowed origins
+  const allowedOrigins = [
     'https://innovationneumologia.github.io',
     'https://*.github.io',
     'http://localhost:3000',
-    'http://localhost:8080',
-    'http://localhost:5500'
-];
-
-const corsOptions = {
-    origin: function (origin, callback) {
-        // Allow requests with no origin
-        if (!origin) return callback(null, true);
-        
-        // Check if origin is in allowed list
-        const isAllowed = allowedOrigins.some(allowedOrigin => {
-            if (allowedOrigin.includes('*')) {
-                // Handle wildcard domains
-                const regexPattern = allowedOrigin.replace(/\*/g, '.*');
-                return new RegExp(`^${regexPattern}$`).test(origin);
-            }
-            return allowedOrigin === origin;
-        });
-        
-        if (isAllowed) {
-            callback(null, true);
-        } else {
-            console.warn(`Blocked by CORS: ${origin}`);
-            callback(new Error('Not allowed by CORS'));
-        }
-    },
-    credentials: true,
-    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
-    maxAge: 86400
-};
-
-// Apply CORS middleware
-app.use(cors(corsOptions));
-
-// Handle pre-flight requests
-app.options('*', cors(corsOptions));
-
+    'http://localhost:8080'
+  ];
+  
+  // Check if origin is allowed
+  let isAllowed = false;
+  if (origin) {
+    isAllowed = allowedOrigins.some(allowedOrigin => {
+      if (allowedOrigin.includes('*')) {
+        const pattern = allowedOrigin.replace(/\*/g, '.*');
+        const regex = new RegExp(`^${pattern}$`);
+        return regex.test(origin);
+      }
+      return allowedOrigin === origin;
+    });
+  }
+  
+  // Set CORS headers
+  if (isAllowed) {
+    res.header('Access-Control-Allow-Origin', origin);
+    res.header('Access-Control-Allow-Credentials', 'true');
+    res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
+  }
+  
+  // ⭐⭐⭐ CRITICAL FIX: Also allow requests with NO origin (like curl, Postman) ⭐⭐⭐
+  if (!origin) {
+    res.header('Access-Control-Allow-Origin', '*');  // <-- ADD THIS LINE!
+  }
+  
+  // Handle OPTIONS preflight
+  if (req.method === 'OPTIONS') {
+    return res.status(200).end();
+  }
+  
+  next();
+});
 // Rate limiting
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
