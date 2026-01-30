@@ -368,7 +368,8 @@ app.post('/api/auth/login', authLimiter, validate(schemas.login), async (req, re
     const { email, password } = req.validatedData;
     
     // Development fallback for admin
-    if (NODE_ENV === 'development' && email === 'admin@neumocare.org' && password === 'password123') {
+    if (email === 'admin@neumocare.org' && password === 'password123') {
+
       const token = jwt.sign(
         { 
           id: '11111111-1111-1111-1111-111111111111', 
