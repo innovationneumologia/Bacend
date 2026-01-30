@@ -37,44 +37,55 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY, {
 });
 
 // ============ CORS CONFIGURATION ============
+// Replace the entire CORS section in your backend with this:
+
+// ============ CORS CONFIGURATION ============
+const cors = require('cors');
+
+const allowedOrigins = [
+    'https://innovationneumologia.github.io',
+    'https://innovationneumologia.github.io/',
+    'https://*.github.io',
+    'http://localhost:3000',
+    'http://localhost:8080',
+    'http://localhost:5500',
+    'http://127.0.0.1:5500'
+];
+
 const corsOptions = {
-  origin: function (origin, callback) {
-    const allowedOrigins = [
-      'https://innovationneumologia.github.io',
-      'https://*.github.io',
-      'http://localhost:3000',
-      'http://localhost:8080',
-      'http://localhost:5500',
-      'http://127.0.0.1:5500',
-      'https://bacend-production.up.railway.app'
-    ];
-    
-    // Allow requests with no origin (like mobile apps or curl requests)
-    if (!origin) return callback(null, true);
-    
-    if (allowedOrigins.indexOf(origin) !== -1 || 
-        allowedOrigins.some(allowed => allowed.includes('*') && origin.match(new RegExp(allowed.replace('*', '.*'))))) {
-      callback(null, true);
-    } else {
-      console.warn(`Blocked by CORS: ${origin}`);
-      callback(new Error('Not allowed by CORS'));
-    }
-  },
-  credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
-  exposedHeaders: ['Content-Range', 'X-Content-Range'],
-  maxAge: 86400
+    origin: function (origin, callback) {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin) return callback(null, true);
+        
+        // Check if origin is in allowed list
+        const isAllowed = allowedOrigins.some(allowedOrigin => {
+            if (allowedOrigin.includes('*')) {
+                // Handle wildcard domains
+                const regexPattern = allowedOrigin.replace(/\*/g, '.*');
+                return new RegExp(`^${regexPattern}$`).test(origin);
+            }
+            return allowedOrigin === origin;
+        });
+        
+        if (isAllowed) {
+            callback(null, true);
+        } else {
+            console.warn(`Blocked by CORS: ${origin}`);
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept', 'x-fallback-token'],
+    exposedHeaders: ['Content-Range', 'X-Content-Range'],
+    maxAge: 86400
 };
 
-// ============ MIDDLEWARE ============
+// Apply CORS middleware
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions)); // Enable pre-flight for all routes
 
-app.use(helmet({
-  contentSecurityPolicy: false, // Disable CSP for now to avoid issues with dynamic content
-  crossOriginResourcePolicy: { policy: "cross-origin" }
-}));
+// Handle pre-flight requests for all routes
+app.options('*', cors(corsOptions));
 
 // Rate limiting
 const apiLimiter = rateLimit({
