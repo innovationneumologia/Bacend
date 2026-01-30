@@ -71,8 +71,6 @@ const upload = multer({
   }
 });
 
-// ============ SECURITY MIDDLEWARE ============
-// ============ MANUAL CORS HANDLER ============
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   
@@ -105,6 +103,11 @@ app.use((req, res, next) => {
     res.header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization');
   }
   
+  // ⭐⭐⭐ CRITICAL FIX: Also allow requests with NO origin (like curl, Postman) ⭐⭐⭐
+  if (!origin) {
+    res.header('Access-Control-Allow-Origin', '*');  // <-- ADD THIS LINE!
+  }
+  
   // Handle OPTIONS preflight
   if (req.method === 'OPTIONS') {
     return res.status(200).end();
@@ -112,7 +115,6 @@ app.use((req, res, next) => {
   
   next();
 });
-
 // Rate Limiting
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
