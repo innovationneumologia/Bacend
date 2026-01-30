@@ -1,6 +1,6 @@
 // ============ NEUMOCARE HOSPITAL MANAGEMENT SYSTEM API ============
-// VERSION 5.0 - COMPLETE PRODUCTION API (100% VUE COMPATIBLE)
-// ================================================================
+// VERSION 5.0 - COMPLETE PRODUCTION-READY API WITH CORS FIXES
+// ================================================ =================
 
 const express = require('express');
 const cors = require('cors');
@@ -10,10 +10,10 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const { createClient } = require('@supabase/supabase-js');
 const Joi = require('joi');
-const crypto = require('crypto');
 const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
+const crypto = require('crypto');
 require('dotenv').config();
 
 // ============ INITIALIZATION ============
@@ -24,13 +24,14 @@ const PORT = process.env.PORT || 3000;
 const {
   SUPABASE_URL,
   SUPABASE_SERVICE_KEY,
-  JWT_SECRET = process.env.JWT_SECRET || 'neumocare-secure-secret-2024',
-  NODE_ENV = 'development'
+  JWT_SECRET = process.env.JWT_SECRET || 'sb_secret_ah53o9afyZzuAfccFM2HNA_rEmi6-iJ',
+  NODE_ENV = 'production',
+  ALLOWED_ORIGINS = 'https://innovationneumologia.github.io,http://localhost:3000,http://localhost:8080'
 } = process.env;
 
 // Validate required environment variables
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
-  console.error('❌ Missing Supabase environment variables');
+  console.error('❌ Missing required environment variables');
   process.exit(1);
 }
 
@@ -55,7 +56,7 @@ const storage = multer.diskStorage({
 
 const upload = multer({
   storage: storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
+  limits: { fileSize: 10 * 1024 * 1024 }, // 10MB limit
   fileFilter: (req, file, cb) => {
     const allowedTypes = /jpeg|jpg|png|pdf|doc|docx|xls|xlsx|txt/;
     const extname = allowedTypes.test(path.extname(file.originalname).toLowerCase());
@@ -67,57 +68,154 @@ const upload = multer({
   }
 });
 
-// ============ MIDDLEWARE ============
-app.use(helmet());
-app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+// ============ CORS CONFIGURATION - FIXED ============
+const allowedOrigins = ALLOWED_ORIGINS.split(',');
 
-// CORS Configuration
+const corsOptions = {
+  origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl, postman)
+    if (!origin) return callback(null, true);
+    
+    if (allowedOrigins.indexOf(origin) !== -1 || 
+        allowedOrigins.includes('*') || 
+        origin.includes('localhost') || 
+        origin.includes('127.0.0.1')) {
+      callback(null, true);
+    } else {
+      console.log('⚠️ CORS blocked origin:', origin);
+      callback(new Error('Not allowed by CORS'));
+    }
+  },
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  allowedHeaders: [
+    'Content-Type', 
+    'Authorization', 
+    'X-Requested-With', 
+    'Accept', 
+    'Origin',
+    'Access-Control-Allow-Headers',
+    'Access-Control-Request-Method',
+    'Access-Control-Request-Headers'
+  ],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
+  maxAge: 86400 // 24 hours
+};
+
+// Apply CORS middleware globally
+app.use(cors(corsOptions));
+
+// Handle pre-flight requests
+app.options('*', cors(corsOptions));
+
+// Additional CORS headers for all responses
 app.use((req, res, next) => {
-  const allowedOrigins = [
-    'https://innovationneumologia.github.io',
-    'http://localhost:8080',
-    'http://localhost:5173',
-    'http://localhost:3000'
-  ];
-  
+  // Get the origin from the request
   const origin = req.headers.origin;
-  if (allowedOrigins.includes(origin)) {
-    res.header('Access-Control-Allow-Origin', origin);
+  
+  // Check if origin is in allowed list
+  if (allowedOrigins.includes(origin) || 
+      allowedOrigins.includes('*') || 
+      !origin || 
+      origin.includes('localhost') || 
+      origin.includes('127.0.0.1')) {
+    res.header('Access-Control-Allow-Origin', origin || '*');
   }
   
   res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
   
+  // Handle pre-flight requests
   if (req.method === 'OPTIONS') {
-    return res.status(200).json({});
+    console.log(`✅ OPTIONS pre-flight request for: ${req.url}`);
+    return res.status(200).json({
+      status: 'pre-flight OK',
+      timestamp: new Date().toISOString()
+    });
   }
   
   next();
 });
-
-// Static files for uploads
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Rate Limiting
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
-  max: 100,
-  message: { error: 'Too many requests' }
+  max: 1000,
+  message: { error: 'Too many requests from this IP' },
+  standardHeaders: true,
+  legacyHeaders: false
 });
 
 const authLimiter = rateLimit({
   windowMs: 60 * 60 * 1000,
-  max: NODE_ENV === 'development' ? 100 : 5,
+  max: 50,
   message: { error: 'Too many login attempts' },
   skipSuccessfulRequests: true
 });
 
+// Security middleware
+app.use(helmet({
+  crossOriginResourcePolicy: { policy: "cross-origin" },
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
+      fontSrc: ["'self'", "https://fonts.gstatic.com"],
+      imgSrc: ["'self'", "data:", "https:"],
+      scriptSrc: ["'self'", "'unsafe-inline'"]
+    }
+  }
+}));
+
+// Body parsing middleware
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
+
+// Static files for uploads
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+
 // Request Logger
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`);
+  const timestamp = new Date().toISOString();
+  const method = req.method;
+  const url = req.url;
+  const origin = req.headers.origin || 'no-origin';
+  const userAgent = req.headers['user-agent'] || 'no-user-agent';
+  
+  console.log(`📡 [${timestamp}] ${method} ${url} - Origin: ${origin} - UA: ${userAgent.substring(0, 50)}...`);
+  
+  // Log detailed CORS info for debugging
+  if (req.method === 'OPTIONS') {
+    console.log(`   🔍 Pre-flight headers:`, {
+      'access-control-request-method': req.headers['access-control-request-method'],
+      'access-control-request-headers': req.headers['access-control-request-headers']
+    });
+  }
+  
   next();
+});
+
+// ============ ROOT ENDPOINT ============
+app.get('/', (req, res) => {
+  res.json({
+    service: 'NeumoCare Hospital Management System API',
+    version: '5.0.0',
+    status: 'operational',
+    environment: NODE_ENV,
+    cors: {
+      allowed_origins: allowedOrigins,
+      status: 'enabled'
+    },
+    endpoints: {
+      health: '/health',
+      debug: '/api/debug/tables',
+      auth: '/api/auth/login',
+      docs: 'See /health for full endpoint list'
+    },
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime()
+  });
 });
 
 // ============ UTILITY FUNCTIONS ============
@@ -125,8 +223,10 @@ const generateId = (prefix) => `${prefix}-${Date.now().toString(36)}-${Math.rand
 const formatDate = (dateString) => {
   if (!dateString) return '';
   try {
-    return new Date(dateString).toISOString().split('T')[0];
-  } catch {
+    const date = new Date(dateString);
+    if (isNaN(date.getTime())) return '';
+    return date.toISOString().split('T')[0];
+  } catch (error) {
     return '';
   }
 };
@@ -134,12 +234,15 @@ const calculateDays = (start, end) => {
   try {
     const startDate = new Date(start);
     const endDate = new Date(end);
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) return 0;
     const diffTime = Math.abs(endDate - startDate);
     return Math.ceil(diffTime / (1000 * 60 * 60 * 24)) + 1;
-  } catch {
+  } catch (error) {
     return 0;
   }
 };
+const generatePassword = () => crypto.randomBytes(8).toString('hex');
+const hashPassword = async (password) => await bcrypt.hash(password, 10);
 
 // ============ VALIDATION SCHEMAS ============
 const schemas = {
@@ -147,6 +250,27 @@ const schemas = {
     email: Joi.string().email().required().trim().lowercase(),
     password: Joi.string().min(6).required(),
     remember_me: Joi.boolean().default(false)
+  }),
+  register: Joi.object({
+    email: Joi.string().email().required().trim().lowercase(),
+    password: Joi.string().min(8).required(),
+    full_name: Joi.string().min(2).max(100).required(),
+    user_role: Joi.string().valid('system_admin', 'department_head', 'resident_manager', 'attending_physician', 'viewing_doctor').required(),
+    department_id: Joi.string().uuid().optional().allow('', null),
+    phone_number: Joi.string().pattern(/^[\d\s\-\+\(\)]{10,20}$/).optional().allow('')
+  }),
+  forgotPassword: Joi.object({
+    email: Joi.string().email().required().trim().lowercase()
+  }),
+  resetPassword: Joi.object({
+    token: Joi.string().required(),
+    new_password: Joi.string().min(8).required(),
+    confirm_password: Joi.string().valid(Joi.ref('new_password')).required()
+  }),
+  changePassword: Joi.object({
+    current_password: Joi.string().required(),
+    new_password: Joi.string().min(8).required(),
+    confirm_password: Joi.string().valid(Joi.ref('new_password')).required()
   }),
   medicalStaff: Joi.object({
     full_name: Joi.string().min(2).max(100).required(),
@@ -156,11 +280,16 @@ const schemas = {
     professional_email: Joi.string().email().required(),
     department_id: Joi.string().uuid().optional().allow('', null),
     resident_category: Joi.string().valid('department_internal', 'rotating_other_dept', 'external_institution').optional().allow(''),
+    training_year: Joi.number().min(1).max(10).optional().allow(null),
     specialization: Joi.string().max(100).optional().allow(''),
     years_experience: Joi.number().min(0).max(50).optional().allow(null),
     biography: Joi.string().max(1000).optional().allow(''),
     mobile_phone: Joi.string().pattern(/^[\d\s\-\+\(\)]{10,20}$/).optional().allow(''),
-    medical_license: Joi.string().max(50).optional().allow('')
+    medical_license: Joi.string().max(50).optional().allow(''),
+    date_of_birth: Joi.date().iso().max('now').optional().allow(null),
+    can_supervise_residents: Joi.boolean().default(false),
+    home_department: Joi.string().optional().allow(''),
+    external_institution: Joi.string().optional().allow('')
   }),
   department: Joi.object({
     name: Joi.string().min(2).max(100).required(),
@@ -176,9 +305,9 @@ const schemas = {
     end_date: Joi.date().iso().greater(Joi.ref('start_date')).required(),
     supervising_attending_id: Joi.string().uuid().optional().allow('', null),
     rotation_status: Joi.string().valid('active', 'upcoming', 'completed', 'cancelled').default('active'),
-    rotation_category: Joi.string().valid('clinical_rotation', 'elective', 'research').default('clinical_rotation'),
-    clinical_notes: Joi.string().max(1000).optional().allow(''),
-    supervisor_evaluation: Joi.string().max(1000).optional().allow('')
+    goals: Joi.string().max(1000).optional().allow(''),
+    notes: Joi.string().max(1000).optional().allow(''),
+    rotation_category: Joi.string().valid('clinical_rotation', 'elective', 'research').default('clinical_rotation')
   }),
   onCall: Joi.object({
     duty_date: Joi.date().iso().required(),
@@ -187,7 +316,8 @@ const schemas = {
     end_time: Joi.string().pattern(/^([01]\d|2[0-3]):([0-5]\d)$/).default('17:00'),
     primary_physician_id: Joi.string().uuid().required(),
     backup_physician_id: Joi.string().uuid().optional().allow('', null),
-    coverage_notes: Joi.string().max(500).optional().allow('')
+    coverage_notes: Joi.string().max(500).optional().allow(''),
+    schedule_id: Joi.string().optional()
   }),
   absence: Joi.object({
     staff_member_id: Joi.string().uuid().required(),
@@ -196,7 +326,8 @@ const schemas = {
     leave_end_date: Joi.date().iso().greater(Joi.ref('leave_start_date')).required(),
     leave_reason: Joi.string().max(500).optional().allow(''),
     coverage_required: Joi.boolean().default(true),
-    approval_status: Joi.string().valid('pending', 'approved', 'rejected').default('pending')
+    approval_status: Joi.string().valid('pending', 'approved', 'rejected').default('pending'),
+    review_notes: Joi.string().max(500).optional().allow('')
   }),
   announcement: Joi.object({
     announcement_title: Joi.string().min(5).max(200).required(),
@@ -204,7 +335,70 @@ const schemas = {
     publish_start_date: Joi.date().iso().required(),
     publish_end_date: Joi.date().iso().greater(Joi.ref('publish_start_date')).optional().allow(null),
     priority_level: Joi.string().valid('low', 'medium', 'high', 'urgent').default('medium'),
-    target_audience: Joi.string().valid('all', 'residents', 'attendings', 'department').default('all')
+    announcement_type: Joi.string().valid('department', 'hospital', 'urgent').default('department'),
+    target_audience: Joi.string().valid('all', 'residents', 'attendings', 'department').default('all'),
+    visible_to_roles: Joi.array().items(Joi.string()).default(['viewing_doctor'])
+  }),
+  userProfile: Joi.object({
+    full_name: Joi.string().min(2).max(100).required(),
+    email: Joi.string().email().required().trim().lowercase(),
+    phone_number: Joi.string().pattern(/^[\d\s\-\+\(\)]{10,20}$/).optional().allow(''),
+    department_id: Joi.string().uuid().optional().allow('', null),
+    user_role: Joi.string().valid('system_admin', 'department_head', 'resident_manager', 'attending_physician', 'viewing_doctor'),
+    notifications_enabled: Joi.boolean().default(true),
+    absence_notifications: Joi.boolean().default(true),
+    announcement_notifications: Joi.boolean().default(true)
+  }),
+  systemSettings: Joi.object({
+    hospital_name: Joi.string().min(2).max(100).required(),
+    default_department_id: Joi.string().uuid().optional().allow(null),
+    max_residents_per_unit: Joi.number().min(1).max(50).default(10),
+    default_rotation_duration: Joi.number().min(1).max(52).default(12),
+    enable_audit_logging: Joi.boolean().default(true),
+    require_mfa: Joi.boolean().default(false),
+    maintenance_mode: Joi.boolean().default(false),
+    notifications_enabled: Joi.boolean().default(true),
+    absence_notifications: Joi.boolean().default(true),
+    announcement_notifications: Joi.boolean().default(true)
+  }),
+  trainingUnit: Joi.object({
+    unit_name: Joi.string().min(2).max(100).required(),
+    unit_code: Joi.string().min(2).max(50).required(),
+    department_id: Joi.string().uuid().optional().allow(null),
+    department_name: Joi.string().optional().allow(''),
+    maximum_residents: Joi.number().min(1).max(50).default(10),
+    unit_description: Joi.string().max(500).optional().allow(''),
+    supervisor_id: Joi.string().uuid().optional().allow(null),
+    unit_status: Joi.string().valid('active', 'inactive').default('active'),
+    specialty: Joi.string().optional().allow(''),
+    location_building: Joi.string().optional().allow(''),
+    location_floor: Joi.string().optional().allow('')
+  }),
+  notification: Joi.object({
+    title: Joi.string().min(2).max(200).required(),
+    message: Joi.string().min(5).max(1000).required(),
+    notification_type: Joi.string().valid('info', 'warning', 'error', 'success').default('info'),
+    priority: Joi.string().valid('low', 'medium', 'high').default('medium'),
+    recipient_id: Joi.string().uuid().optional().allow(null),
+    recipient_role: Joi.string().valid('all', 'system_admin', 'department_head', 'resident_manager', 'attending_physician', 'viewing_doctor').default('all')
+  }),
+  auditLog: Joi.object({
+    action: Joi.string().min(2).max(100).required(),
+    resource: Joi.string().min(2).max(100).required(),
+    resource_id: Joi.string().optional().allow(''),
+    user_id: Joi.string().uuid().required(),
+    ip_address: Joi.string().ip().optional().allow(''),
+    user_agent: Joi.string().optional().allow(''),
+    details: Joi.object().optional()
+  }),
+  attachment: Joi.object({
+    filename: Joi.string().min(1).max(255).required(),
+    original_filename: Joi.string().min(1).max(255).required(),
+    file_size: Joi.number().min(1).max(10485760).required(), // 10MB max
+    mime_type: Joi.string().required(),
+    entity_type: Joi.string().valid('medical_staff', 'rotation', 'absence', 'announcement', 'user').required(),
+    entity_id: Joi.string().uuid().required(),
+    description: Joi.string().max(500).optional().allow('')
   })
 };
 
@@ -229,24 +423,26 @@ const authenticateToken = (req, res, next) => {
   const authHeader = req.headers['authorization'];
   const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.split(' ')[1] : null;
   
-  // Accept fallback token for Vue frontend compatibility
-  const fallbackToken = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpZCI6IjExMTExMTExLTExMTEtMTExMS0xMTExLTExMTExMTExMTExMSIsImVtYWlsIjoiYWRtaW5AbmV1bW9jYXJlLm9yZyIsInJvbGUiOiJzeXN0ZW1fYWRtaW4iLCJpYXQiOjE3Njk2ODMyNzEsImV4cCI6MTc2OTc2OTY3MX0.-v1HyJa27hYAJp2lSQeEMGUvpCq8ngU9r43Ewyn5g8E';
-  
-  if (token === fallbackToken) {
-    req.user = {
-      id: '11111111-1111-1111-1111-111111111111',
-      email: 'admin@neumocare.org',
-      role: 'system_admin'
-    };
-    return next();
-  }
-  
   if (!token) {
-    return res.status(401).json({ error: 'Authentication required' });
+    // For OPTIONS requests (pre-flight), skip authentication
+    if (req.method === 'OPTIONS') {
+      return next();
+    }
+    return res.status(401).json({ 
+      error: 'Authentication required', 
+      message: 'No access token provided',
+      hint: 'Include Authorization: Bearer <token> header'
+    });
   }
   
   jwt.verify(token, JWT_SECRET, (err, user) => {
-    if (err) return res.status(403).json({ error: 'Invalid token' });
+    if (err) {
+      return res.status(403).json({ 
+        error: 'Invalid token', 
+        message: 'Access token is invalid or expired',
+        hint: 'Try logging in again'
+      });
+    }
     req.user = user;
     next();
   });
@@ -255,7 +451,19 @@ const authenticateToken = (req, res, next) => {
 // ============ PERMISSION MIDDLEWARE ============
 const checkPermission = (resource, action) => {
   return (req, res, next) => {
-    if (!req.user || !req.user.role) return res.status(401).json({ error: 'Authentication required' });
+    // Allow OPTIONS pre-flight requests
+    if (req.method === 'OPTIONS') {
+      return next();
+    }
+    
+    if (!req.user || !req.user.role) {
+      return res.status(401).json({ 
+        error: 'Authentication required',
+        message: 'User information not found in request'
+      });
+    }
+    
+    // System admin has all permissions
     if (req.user.role === 'system_admin') return next();
     
     const rolePermissions = {
@@ -269,6 +477,7 @@ const checkPermission = (resource, action) => {
       system_settings: ['system_admin'],
       users: ['system_admin', 'department_head'],
       audit_logs: ['system_admin'],
+      notifications: ['system_admin', 'department_head', 'resident_manager'],
       attachments: ['system_admin', 'department_head', 'resident_manager']
     };
     
@@ -276,34 +485,176 @@ const checkPermission = (resource, action) => {
     if (!allowedRoles || !allowedRoles.includes(req.user.role)) {
       return res.status(403).json({ 
         error: 'Insufficient permissions',
-        message: `Your role (${req.user.role}) does not have permission to ${action} ${resource}`
+        message: `Your role (${req.user.role}) does not have permission to ${action} ${resource}`,
+        required_roles: allowedRoles || ['system_admin']
       });
     }
+    
+    next();
+  };
+};
+
+// ============ AUDIT LOGGING MIDDLEWARE ============
+const auditLog = async (action, resource, resource_id = '', details = {}) => {
+  try {
+    await supabase.from('audit_logs').insert({
+      action,
+      resource,
+      resource_id,
+      user_id: 'system', // Will be replaced by actual user in middleware
+      ip_address: '',
+      user_agent: '',
+      details,
+      created_at: new Date().toISOString()
+    });
+  } catch (error) {
+    console.error('Audit logging failed:', error);
+  }
+};
+
+const auditMiddleware = (action, resource) => {
+  return async (req, res, next) => {
+    const originalJson = res.json;
+    res.json = function(data) {
+      if (req.user && req.method !== 'OPTIONS') {
+        auditLog(
+          action,
+          resource,
+          req.params.id || req.body.id || '',
+          {
+            method: req.method,
+            url: req.url,
+            statusCode: res.statusCode,
+            userId: req.user.id,
+            userRole: req.user.role,
+            timestamp: new Date().toISOString()
+          }
+        );
+      }
+      originalJson.call(this, data);
+    };
     next();
   };
 };
 
 // ============ API ROUTES ============
 
-// 1. HEALTH CHECK
-app.get('/health', (req, res) => {
+// ===== 1. HEALTH CHECK ENDPOINTS =====
+
+/**
+ * @route GET /health
+ * @description Check API status and database connectivity
+ * @access Public
+ */
+app.get('/health', apiLimiter, (req, res) => {
   res.json({
     status: 'healthy',
     service: 'NeumoCare Hospital Management System API',
     version: '5.0.0',
     timestamp: new Date().toISOString(),
     environment: NODE_ENV,
-    database: 'Connected',
-    uptime: process.uptime()
+    cors: {
+      allowed_origins: allowedOrigins,
+      your_origin: req.headers.origin || 'not-specified'
+    },
+    database: SUPABASE_URL ? 'Connected' : 'Not connected',
+    uptime: process.uptime(),
+    endpoints: {
+      total: 71,
+      categories: 20
+    }
   });
 });
 
-// 2. AUTHENTICATION ENDPOINTS
+/**
+ * @route GET /api/debug/tables
+ * @description Debug endpoint to check table accessibility
+ * @access Private
+ */
+app.get('/api/debug/tables', authenticateToken, apiLimiter, async (req, res) => {
+  try {
+    const testPromises = [
+      supabase.from('resident_rotations').select('id').limit(1),
+      supabase.from('oncall_schedule').select('id').limit(1),
+      supabase.from('leave_requests').select('id').limit(1),
+      supabase.from('medical_staff').select('id').limit(1),
+      supabase.from('training_units').select('id').limit(1),
+      supabase.from('departments').select('id').limit(1),
+      supabase.from('app_users').select('id').limit(1),
+      supabase.from('audit_logs').select('id').limit(1),
+      supabase.from('notifications').select('id').limit(1),
+      supabase.from('attachments').select('id').limit(1)
+    ];
+    
+    const results = await Promise.allSettled(testPromises);
+    const tableStatus = {
+      resident_rotations: results[0].status === 'fulfilled' && !results[0].value.error ? '✅ Accessible' : '❌ Error',
+      oncall_schedule: results[1].status === 'fulfilled' && !results[1].value.error ? '✅ Accessible' : '❌ Error',
+      leave_requests: results[2].status === 'fulfilled' && !results[2].value.error ? '✅ Accessible' : '❌ Error',
+      medical_staff: results[3].status === 'fulfilled' && !results[3].value.error ? '✅ Accessible' : '❌ Error',
+      training_units: results[4].status === 'fulfilled' && !results[4].value.error ? '✅ Accessible' : '❌ Error',
+      departments: results[5].status === 'fulfilled' && !results[5].value.error ? '✅ Accessible' : '❌ Error',
+      app_users: results[6].status === 'fulfilled' && !results[6].value.error ? '✅ Accessible' : '❌ Error',
+      audit_logs: results[7].status === 'fulfilled' && !results[7].value.error ? '✅ Accessible' : '❌ Error',
+      notifications: results[8].status === 'fulfilled' && !results[8].value.error ? '✅ Accessible' : '❌ Error',
+      attachments: results[9].status === 'fulfilled' && !results[9].value.error ? '✅ Accessible' : '❌ Error'
+    };
+    
+    res.json({ 
+      message: 'Table accessibility test', 
+      status: tableStatus,
+      cors_check: {
+        your_origin: req.headers.origin || 'not-specified',
+        allowed: allowedOrigins.includes(req.headers.origin) || allowedOrigins.includes('*')
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Debug test failed', message: error.message });
+  }
+});
+
+/**
+ * @route GET /api/debug/cors
+ * @description Debug CORS issues
+ * @access Public
+ */
+app.get('/api/debug/cors', apiLimiter, (req, res) => {
+  const origin = req.headers.origin || 'no-origin-header';
+  const isAllowed = allowedOrigins.includes(origin) || allowedOrigins.includes('*');
+  
+  res.json({
+    endpoint: '/api/debug/cors',
+    your_origin: origin,
+    allowed_origins: allowedOrigins,
+    is_allowed: isAllowed,
+    request_headers: {
+      origin: req.headers.origin,
+      'user-agent': req.headers['user-agent']?.substring(0, 50) + '...',
+      'access-control-request-method': req.headers['access-control-request-method'],
+      'access-control-request-headers': req.headers['access-control-request-headers']
+    },
+    response_headers: {
+      'access-control-allow-origin': res.getHeader('access-control-allow-origin'),
+      'access-control-allow-credentials': res.getHeader('access-control-allow-credentials'),
+      'access-control-allow-methods': res.getHeader('access-control-allow-methods')
+    },
+    timestamp: new Date().toISOString(),
+    advice: isAllowed ? '✅ Your origin is allowed' : '❌ Your origin is NOT in allowed list'
+  });
+});
+
+// ===== 2. AUTHENTICATION ENDPOINTS =====
+
+/**
+ * @route POST /api/auth/login
+ * @description User login with JWT token generation
+ * @access Public
+ */
 app.post('/api/auth/login', authLimiter, validate(schemas.login), async (req, res) => {
   try {
     const { email, password } = req.validatedData;
     
-    // Default admin login (for Vue frontend compatibility)
+    // Hardcoded admin account for development
     if (email === 'admin@neumocare.org' && password === 'password123') {
       const token = jwt.sign(
         { 
@@ -326,7 +677,6 @@ app.post('/api/auth/login', authLimiter, validate(schemas.login), async (req, re
       });
     }
     
-    // Database login
     const { data: user, error } = await supabase
       .from('app_users')
       .select('id, email, full_name, user_role, department_id, password_hash, account_status')
@@ -334,16 +684,25 @@ app.post('/api/auth/login', authLimiter, validate(schemas.login), async (req, re
       .single();
     
     if (error || !user) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return res.status(401).json({ 
+        error: 'Authentication failed', 
+        message: 'Invalid email or password' 
+      });
     }
     
     if (user.account_status !== 'active') {
-      return res.status(403).json({ error: 'Account deactivated' });
+      return res.status(403).json({ 
+        error: 'Account disabled', 
+        message: 'Your account has been deactivated' 
+      });
     }
     
     const validPassword = await bcrypt.compare(password, user.password_hash || '');
     if (!validPassword) {
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return res.status(401).json({ 
+        error: 'Authentication failed', 
+        message: 'Invalid email or password' 
+      });
     }
     
     const token = jwt.sign(
@@ -353,32 +712,105 @@ app.post('/api/auth/login', authLimiter, validate(schemas.login), async (req, re
     );
     
     const { password_hash, ...userWithoutPassword } = user;
-    res.json({ token, user: userWithoutPassword });
     
+    res.json({ 
+      token, 
+      user: userWithoutPassword,
+      expires_in: '24h'
+    });
   } catch (error) {
     console.error('Login error:', error);
-    res.status(500).json({ error: 'Login failed' });
+    res.status(500).json({ 
+      error: 'Internal server error', 
+      message: 'An unexpected error occurred during login' 
+    });
   }
 });
 
-app.post('/api/auth/logout', authenticateToken, (req, res) => {
-  res.json({ message: 'Logged out successfully' });
+/**
+ * @route POST /api/auth/logout
+ * @description User logout (client-side token removal)
+ * @access Private
+ */
+app.post('/api/auth/logout', authenticateToken, apiLimiter, async (req, res) => {
+  try {
+    res.json({ 
+      message: 'Logged out successfully', 
+      timestamp: new Date().toISOString() 
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Logout failed', message: error.message });
+  }
 });
 
-app.post('/api/auth/forgot-password', async (req, res) => {
+/**
+ * @route POST /api/auth/register
+ * @description Register new user (admin only)
+ * @access Private
+ */
+app.post('/api/auth/register', authenticateToken, checkPermission('users', 'create'), validate(schemas.register), async (req, res) => {
   try {
-    const { email } = req.body;
-    if (!email) return res.status(400).json({ error: 'Email is required' });
+    const { email, password, ...userData } = req.validatedData;
+    const passwordHash = await bcrypt.hash(password, 10);
+    const newUser = {
+      ...userData,
+      email: email.toLowerCase(),
+      password_hash: passwordHash,
+      account_status: 'active',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
     
+    const { data, error } = await supabase
+      .from('app_users')
+      .insert([newUser])
+      .select('id, email, full_name, user_role, department_id')
+      .single();
+    
+    if (error) {
+      if (error.code === '23505') {
+        return res.status(409).json({ error: 'User already exists' });
+      }
+      throw error;
+    }
+    
+    res.status(201).json({ 
+      message: 'User registered successfully', 
+      user: data 
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to register user', message: error.message });
+  }
+});
+
+/**
+ * @route POST /api/auth/forgot-password
+ * @description Request password reset link
+ * @access Public
+ */
+app.post('/api/auth/forgot-password', authLimiter, validate(schemas.forgotPassword), async (req, res) => {
+  try {
+    const { email } = req.validatedData;
     const { data: user } = await supabase
       .from('app_users')
       .select('id, email, full_name')
       .eq('email', email.toLowerCase())
       .single();
     
-    if (!user) return res.status(404).json({ error: 'User not found' });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
     
-    const resetToken = jwt.sign({ userId: user.id, email: user.email }, JWT_SECRET, { expiresIn: '1h' });
+    const resetToken = jwt.sign(
+      { userId: user.id, email: user.email }, 
+      JWT_SECRET, 
+      { expiresIn: '1h' }
+    );
+    
+    const resetLink = `https://innovationneumologia.github.io/reset-password?token=${resetToken}`;
+    
+    // Log reset link (in production, send email)
+    console.log(`Password reset link for ${user.email}: ${resetLink}`);
     
     // Store token in database
     await supabase.from('password_resets').upsert({
@@ -388,198 +820,370 @@ app.post('/api/auth/forgot-password', async (req, res) => {
       created_at: new Date().toISOString()
     });
     
-    res.json({ message: 'Password reset link sent to email' });
-    
+    res.json({ 
+      message: 'Password reset link sent to email',
+      hint: 'Check server logs for the reset link in development'
+    });
   } catch (error) {
-    console.error('Forgot password error:', error);
-    res.status(500).json({ error: 'Failed to process password reset' });
+    res.status(500).json({ error: 'Failed to process password reset', message: error.message });
   }
 });
 
-app.post('/api/auth/reset-password', async (req, res) => {
+/**
+ * @route POST /api/auth/reset-password
+ * @description Reset password with token
+ * @access Public
+ */
+app.post('/api/auth/reset-password', authLimiter, validate(schemas.resetPassword), async (req, res) => {
   try {
-    const { token, new_password, confirm_password } = req.body;
-    
-    if (!token || !new_password || !confirm_password) {
-      return res.status(400).json({ error: 'All fields are required' });
-    }
-    
-    if (new_password !== confirm_password) {
-      return res.status(400).json({ error: 'Passwords do not match' });
-    }
-    
+    const { token, new_password } = req.validatedData;
     const decoded = jwt.verify(token, JWT_SECRET);
     const passwordHash = await bcrypt.hash(new_password, 10);
     
     const { error } = await supabase
       .from('app_users')
-      .update({ password_hash: passwordHash, updated_at: new Date().toISOString() })
+      .update({ 
+        password_hash: passwordHash, 
+        updated_at: new Date().toISOString() 
+      })
       .eq('email', decoded.email);
     
     if (error) throw error;
     
+    // Delete used token
     await supabase.from('password_resets').delete().eq('token', token);
     
     res.json({ message: 'Password reset successfully' });
-    
   } catch (error) {
-    console.error('Reset password error:', error);
-    res.status(400).json({ error: 'Invalid or expired token' });
+    res.status(400).json({ error: 'Invalid or expired token', message: error.message });
   }
 });
 
-// 3. DASHBOARD ENDPOINTS
-app.get('/api/dashboard/stats', authenticateToken, async (req, res) => {
+// ===== 3. USER MANAGEMENT ENDPOINTS =====
+
+/**
+ * @route GET /api/users
+ * @description List all users with pagination
+ * @access Private
+ */
+app.get('/api/users', authenticateToken, checkPermission('users', 'read'), apiLimiter, async (req, res) => {
   try {
-    const today = formatDate(new Date());
+    const { page = 1, limit = 20, role, department_id, status } = req.query;
+    const offset = (page - 1) * limit;
     
-    // Get all counts in parallel
-    const [
-      { count: totalStaff = 0 },
-      { count: activeStaff = 0 },
-      { count: activeResidents = 0 },
-      { count: todayOnCall = 0 },
-      { count: pendingAbsences = 0 },
-      { count: activeAlerts = 0 }
-    ] = await Promise.all([
-      supabase.from('medical_staff').select('*', { count: 'exact', head: true }),
-      supabase.from('medical_staff').select('*', { count: 'exact', head: true }).eq('employment_status', 'active'),
-      supabase.from('medical_staff').select('*', { count: 'exact', head: true })
-        .eq('staff_type', 'medical_resident')
-        .eq('employment_status', 'active'),
-      supabase.from('oncall_schedule').select('*', { count: 'exact', head: true }).eq('duty_date', today),
-      supabase.from('leave_requests').select('*', { count: 'exact', head: true }).eq('approval_status', 'pending'),
-      supabase.from('department_announcements').select('*', { count: 'exact', head: true })
-        .eq('priority_level', 'urgent')
-        .or(`publish_end_date.gte.${today},publish_end_date.is.null`)
-    ]);
+    let query = supabase
+      .from('app_users')
+      .select('id, email, full_name, user_role, department_id, phone_number, account_status, created_at, updated_at', { count: 'exact' });
+    
+    if (role) query = query.eq('user_role', role);
+    if (department_id) query = query.eq('department_id', department_id);
+    if (status) query = query.eq('account_status', status);
+    
+    const { data, error, count } = await query
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+    
+    if (error) throw error;
     
     res.json({
-      totalStaff,
-      activeStaff,
-      activeResidents,
-      todayOnCall,
-      pendingAbsences,
-      activeAlerts,
-      timestamp: new Date().toISOString()
+      data: data || [],
+      pagination: { 
+        page: parseInt(page), 
+        limit: parseInt(limit), 
+        total: count || 0, 
+        totalPages: Math.ceil((count || 0) / limit) 
+      }
     });
-    
   } catch (error) {
-    console.error('Dashboard stats error:', error);
-    // Return fallback data for Vue frontend
-    res.json({
-      totalStaff: 45,
-      activeStaff: 42,
-      activeResidents: 28,
-      todayOnCall: 3,
-      pendingAbsences: 5,
-      activeAlerts: 2
-    });
+    res.status(500).json({ error: 'Failed to fetch users', message: error.message });
   }
 });
 
-app.get('/api/dashboard/upcoming-events', authenticateToken, async (req, res) => {
+/**
+ * @route GET /api/users/:id
+ * @description Get user details
+ * @access Private
+ */
+app.get('/api/users/:id', authenticateToken, checkPermission('users', 'read'), apiLimiter, async (req, res) => {
   try {
-    const today = formatDate(new Date());
-    const nextWeek = formatDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+    const { id } = req.params;
+    const { data, error } = await supabase
+      .from('app_users')
+      .select('id, email, full_name, user_role, department_id, phone_number, account_status, created_at, updated_at')
+      .eq('id', id)
+      .single();
     
-    const [rotations, oncall, absences] = await Promise.all([
-      supabase
-        .from('resident_rotations')
-        .select(`
-          *,
-          resident:medical_staff!resident_rotations_resident_id_fkey(full_name),
-          training_unit:training_units!resident_rotations_training_unit_id_fkey(unit_name)
-        `)
-        .gte('start_date', today)
-        .lte('start_date', nextWeek)
-        .eq('rotation_status', 'active')
-        .order('start_date')
-        .limit(5),
-      
-      supabase
-        .from('oncall_schedule')
-        .select(`
-          *,
-          primary_physician:medical_staff!oncall_schedule_primary_physician_id_fkey(full_name)
-        `)
-        .gte('duty_date', today)
-        .lte('duty_date', nextWeek)
-        .order('duty_date')
-        .limit(5),
-      
-      supabase
-        .from('leave_requests')
-        .select(`
-          *,
-          staff_member:medical_staff!leave_requests_staff_member_id_fkey(full_name)
-        `)
-        .gte('leave_start_date', today)
-        .lte('leave_start_date', nextWeek)
-        .eq('approval_status', 'approved')
-        .order('leave_start_date')
-        .limit(5)
-    ]);
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      throw error;
+    }
     
-    // Transform data for Vue frontend compatibility
-    const upcoming_rotations = (rotations.data || []).map(r => ({
-      id: r.id,
-      rotation_id: r.id,
-      resident_id: r.resident_id,
-      resident_name: r.resident?.full_name,
-      training_unit_id: r.training_unit_id,
-      unit_name: r.training_unit?.unit_name,
-      rotation_start_date: r.start_date,
-      rotation_end_date: r.end_date,
-      rotation_status: r.rotation_status,
-      rotation_category: r.rotation_category
-    }));
-    
-    const upcoming_oncall = (oncall.data || []).map(o => ({
-      id: o.id,
-      duty_date: o.duty_date,
-      shift_type: o.shift_type,
-      primary_physician_id: o.primary_physician_id,
-      physician_name: o.primary_physician?.full_name,
-      start_time: o.start_time,
-      end_time: o.end_time
-    }));
-    
-    const upcoming_absences = (absences.data || []).map(a => ({
-      id: a.id,
-      staff_member_id: a.staff_member_id,
-      staff_name: a.staff_member?.full_name,
-      absence_reason: a.leave_category,
-      start_date: a.leave_start_date,
-      end_date: a.leave_end_date,
-      status: 'upcoming',
-      approval_status: a.approval_status
-    }));
-    
-    res.json({
-      upcoming_rotations,
-      upcoming_oncall,
-      upcoming_absences
-    });
-    
+    res.json(data);
   } catch (error) {
-    console.error('Upcoming events error:', error);
-    res.json({
-      upcoming_rotations: [],
-      upcoming_oncall: [],
-      upcoming_absences: []
-    });
+    res.status(500).json({ error: 'Failed to fetch user', message: error.message });
   }
 });
 
-// 4. MEDICAL STAFF ENDPOINTS
-app.get('/api/medical-staff', authenticateToken, apiLimiter, async (req, res) => {
+/**
+ * @route POST /api/users
+ * @description Create new user
+ * @access Private
+ */
+app.post('/api/users', authenticateToken, checkPermission('users', 'create'), validate(schemas.register), async (req, res) => {
   try {
-    const { search, staff_type, employment_status, department_id } = req.query;
+    const { email, password, ...userData } = req.validatedData;
+    const passwordHash = await bcrypt.hash(password, 10);
+    const newUser = {
+      ...userData,
+      email: email.toLowerCase(),
+      password_hash: passwordHash,
+      account_status: 'active',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    
+    const { data, error } = await supabase
+      .from('app_users')
+      .insert([newUser])
+      .select('id, email, full_name, user_role, department_id')
+      .single();
+    
+    if (error) {
+      if (error.code === '23505') {
+        return res.status(409).json({ error: 'User already exists' });
+      }
+      throw error;
+    }
+    
+    res.status(201).json({ 
+      message: 'User created successfully', 
+      user: data 
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to create user', message: error.message });
+  }
+});
+
+/**
+ * @route PUT /api/users/:id
+ * @description Update user
+ * @access Private
+ */
+app.put('/api/users/:id', authenticateToken, checkPermission('users', 'update'), validate(schemas.userProfile), async (req, res) => {
+  try {
+    const { id } = req.params;
+    const updateData = { 
+      ...req.validatedData, 
+      updated_at: new Date().toISOString() 
+    };
+    
+    const { data, error } = await supabase
+      .from('app_users')
+      .update(updateData)
+      .eq('id', id)
+      .select('id, email, full_name, user_role, department_id')
+      .single();
+    
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({ error: 'User not found' });
+      }
+      throw error;
+    }
+    
+    res.json({ 
+      message: 'User updated successfully', 
+      user: data 
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update user', message: error.message });
+  }
+});
+
+/**
+ * @route DELETE /api/users/:id
+ * @description Delete user (soft delete)
+ * @access Private
+ */
+app.delete('/api/users/:id', authenticateToken, checkPermission('users', 'delete'), apiLimiter, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const { error } = await supabase
+      .from('app_users')
+      .update({ 
+        account_status: 'inactive', 
+        updated_at: new Date().toISOString() 
+      })
+      .eq('id', id);
+    
+    if (error) throw error;
+    
+    res.json({ message: 'User deactivated successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete user', message: error.message });
+  }
+});
+
+/**
+ * @route PUT /api/users/:id/activate
+ * @description Activate user account
+ * @access Private
+ */
+app.put('/api/users/:id/activate', authenticateToken, checkPermission('users', 'update'), apiLimiter, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const { error } = await supabase
+      .from('app_users')
+      .update({ 
+        account_status: 'active', 
+        updated_at: new Date().toISOString() 
+      })
+      .eq('id', id);
+    
+    if (error) throw error;
+    
+    res.json({ message: 'User activated successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to activate user', message: error.message });
+  }
+});
+
+/**
+ * @route PUT /api/users/:id/deactivate
+ * @description Deactivate user account
+ * @access Private
+ */
+app.put('/api/users/:id/deactivate', authenticateToken, checkPermission('users', 'update'), apiLimiter, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const { error } = await supabase
+      .from('app_users')
+      .update({ 
+        account_status: 'inactive', 
+        updated_at: new Date().toISOString() 
+      })
+      .eq('id', id);
+    
+    if (error) throw error;
+    
+    res.json({ message: 'User deactivated successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to deactivate user', message: error.message });
+  }
+});
+
+/**
+ * @route PUT /api/users/change-password
+ * @description Change current user's password
+ * @access Private
+ */
+app.put('/api/users/change-password', authenticateToken, validate(schemas.changePassword), async (req, res) => {
+  try {
+    const { current_password, new_password } = req.validatedData;
+    
+    // Get current user's password hash
+    const { data: user, error: fetchError } = await supabase
+      .from('app_users')
+      .select('password_hash')
+      .eq('id', req.user.id)
+      .single();
+    
+    if (fetchError) throw fetchError;
+    
+    // Verify current password
+    const validPassword = await bcrypt.compare(current_password, user.password_hash || '');
+    if (!validPassword) {
+      return res.status(401).json({ error: 'Current password is incorrect' });
+    }
+    
+    // Update password
+    const passwordHash = await bcrypt.hash(new_password, 10);
+    const { error: updateError } = await supabase
+      .from('app_users')
+      .update({ 
+        password_hash: passwordHash, 
+        updated_at: new Date().toISOString() 
+      })
+      .eq('id', req.user.id);
+    
+    if (updateError) throw updateError;
+    
+    res.json({ message: 'Password changed successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to change password', message: error.message });
+  }
+});
+
+// ===== 4. USER PROFILE ENDPOINTS =====
+
+/**
+ * @route GET /api/users/profile
+ * @description Get current user's profile information
+ * @access Private
+ */
+app.get('/api/users/profile', authenticateToken, apiLimiter, async (req, res) => {
+  try {
+    const { data: user, error } = await supabase
+      .from('app_users')
+      .select('id, email, full_name, user_role, department_id, phone_number, notifications_enabled, absence_notifications, announcement_notifications, created_at, updated_at')
+      .eq('id', req.user.id)
+      .single();
+    
+    if (error) throw error;
+    
+    res.json(user);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch user profile', message: error.message });
+  }
+});
+
+/**
+ * @route PUT /api/users/profile
+ * @description Update current user's profile
+ * @access Private
+ */
+app.put('/api/users/profile', authenticateToken, validate(schemas.userProfile), async (req, res) => {
+  try {
+    const updateData = { 
+      ...req.validatedData, 
+      updated_at: new Date().toISOString() 
+    };
+    
+    const { data, error } = await supabase
+      .from('app_users')
+      .update(updateData)
+      .eq('id', req.user.id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update profile', message: error.message });
+  }
+});
+
+// ===== 5. MEDICAL STAFF ENDPOINTS =====
+
+/**
+ * @route GET /api/medical-staff
+ * @description List all medical staff with pagination and filtering
+ * @access Private
+ */
+app.get('/api/medical-staff', authenticateToken, checkPermission('medical_staff', 'read'), apiLimiter, async (req, res) => {
+  try {
+    const { search, staff_type, employment_status, department_id, page = 1, limit = 100 } = req.query;
+    const offset = (page - 1) * limit;
     
     let query = supabase
       .from('medical_staff')
-      .select('*, departments!medical_staff_department_id_fkey(name, code)');
+      .select('*, departments!medical_staff_department_id_fkey(name, code)', { count: 'exact' });
     
     if (search) {
       query = query.or(`full_name.ilike.%${search}%,staff_id.ilike.%${search}%,professional_email.ilike.%${search}%`);
@@ -588,28 +1192,42 @@ app.get('/api/medical-staff', authenticateToken, apiLimiter, async (req, res) =>
     if (employment_status) query = query.eq('employment_status', employment_status);
     if (department_id) query = query.eq('department_id', department_id);
     
-    const { data, error } = await query.order('full_name');
+    const { data, error, count } = await query
+      .order('full_name')
+      .range(offset, offset + limit - 1);
     
     if (error) throw error;
     
-    // Transform for Vue frontend
-    const transformed = (data || []).map(item => ({
+    const transformedData = (data || []).map(item => ({
       ...item,
-      department: item.departments ? { name: item.departments.name, code: item.departments.code } : null
+      department: item.departments ? { 
+        name: item.departments.name, 
+        code: item.departments.code 
+      } : null
     }));
     
-    res.json(transformed);
-    
+    res.json({
+      data: transformedData,
+      pagination: { 
+        page: parseInt(page), 
+        limit: parseInt(limit), 
+        total: count || 0, 
+        totalPages: Math.ceil((count || 0) / limit) 
+      }
+    });
   } catch (error) {
-    console.error('Medical staff error:', error);
-    res.json([]);
+    res.status(500).json({ error: 'Failed to fetch medical staff', message: error.message });
   }
 });
 
-app.get('/api/medical-staff/:id', authenticateToken, async (req, res) => {
+/**
+ * @route GET /api/medical-staff/:id
+ * @description Get detailed information for a specific medical staff member
+ * @access Private
+ */
+app.get('/api/medical-staff/:id', authenticateToken, checkPermission('medical_staff', 'read'), apiLimiter, async (req, res) => {
   try {
     const { id } = req.params;
-    
     const { data, error } = await supabase
       .from('medical_staff')
       .select('*, departments!medical_staff_department_id_fkey(name, code)')
@@ -617,30 +1235,38 @@ app.get('/api/medical-staff/:id', authenticateToken, async (req, res) => {
       .single();
     
     if (error) {
-      if (error.code === 'PGRST116') return res.status(404).json({ error: 'Medical staff not found' });
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({ error: 'Medical staff not found' });
+      }
       throw error;
     }
     
     const transformed = {
       ...data,
-      department: data.departments ? { name: data.departments.name, code: data.departments.code } : null
+      department: data.departments ? { 
+        name: data.departments.name, 
+        code: data.departments.code 
+      } : null
     };
     
     res.json(transformed);
-    
   } catch (error) {
-    console.error('Staff details error:', error);
-    res.status(500).json({ error: 'Failed to fetch staff details' });
+    res.status(500).json({ error: 'Failed to fetch staff details', message: error.message });
   }
 });
 
+/**
+ * @route POST /api/medical-staff
+ * @description Create new medical staff record
+ * @access Private
+ */
 app.post('/api/medical-staff', authenticateToken, checkPermission('medical_staff', 'create'), validate(schemas.medicalStaff), async (req, res) => {
   try {
-    const staffData = {
-      ...req.validatedData,
-      staff_id: req.validatedData.staff_id || generateId('MD'),
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+    const staffData = { 
+      ...req.validatedData, 
+      staff_id: req.validatedData.staff_id || generateId('MD'), 
+      created_at: new Date().toISOString(), 
+      updated_at: new Date().toISOString() 
     };
     
     const { data, error } = await supabase
@@ -650,24 +1276,29 @@ app.post('/api/medical-staff', authenticateToken, checkPermission('medical_staff
       .single();
     
     if (error) {
-      if (error.code === '23505') return res.status(409).json({ error: 'Duplicate entry' });
+      if (error.code === '23505') {
+        return res.status(409).json({ error: 'Duplicate entry' });
+      }
       throw error;
     }
     
     res.status(201).json(data);
-    
   } catch (error) {
-    console.error('Create staff error:', error);
-    res.status(500).json({ error: 'Failed to create medical staff' });
+    res.status(500).json({ error: 'Failed to create medical staff', message: error.message });
   }
 });
 
+/**
+ * @route PUT /api/medical-staff/:id
+ * @description Update existing medical staff record
+ * @access Private
+ */
 app.put('/api/medical-staff/:id', authenticateToken, checkPermission('medical_staff', 'update'), validate(schemas.medicalStaff), async (req, res) => {
   try {
     const { id } = req.params;
-    const staffData = {
-      ...req.validatedData,
-      updated_at: new Date().toISOString()
+    const staffData = { 
+      ...req.validatedData, 
+      updated_at: new Date().toISOString() 
     };
     
     const { data, error } = await supabase
@@ -678,22 +1309,26 @@ app.put('/api/medical-staff/:id', authenticateToken, checkPermission('medical_st
       .single();
     
     if (error) {
-      if (error.code === 'PGRST116') return res.status(404).json({ error: 'Medical staff not found' });
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({ error: 'Medical staff not found' });
+      }
       throw error;
     }
     
     res.json(data);
-    
   } catch (error) {
-    console.error('Update staff error:', error);
-    res.status(500).json({ error: 'Failed to update medical staff' });
+    res.status(500).json({ error: 'Failed to update medical staff', message: error.message });
   }
 });
 
-app.delete('/api/medical-staff/:id', authenticateToken, checkPermission('medical_staff', 'delete'), async (req, res) => {
+/**
+ * @route DELETE /api/medical-staff/:id
+ * @description Deactivate medical staff (soft delete)
+ * @access Private
+ */
+app.delete('/api/medical-staff/:id', authenticateToken, checkPermission('medical_staff', 'delete'), apiLimiter, async (req, res) => {
   try {
     const { id } = req.params;
-    
     const { data, error } = await supabase
       .from('medical_staff')
       .update({ 
@@ -710,15 +1345,19 @@ app.delete('/api/medical-staff/:id', authenticateToken, checkPermission('medical
       message: 'Medical staff deactivated successfully', 
       staff_name: data.full_name 
     });
-    
   } catch (error) {
-    console.error('Delete staff error:', error);
-    res.status(500).json({ error: 'Failed to deactivate medical staff' });
+    res.status(500).json({ error: 'Failed to deactivate medical staff', message: error.message });
   }
 });
 
-// 5. DEPARTMENTS ENDPOINTS
-app.get('/api/departments', authenticateToken, async (req, res) => {
+// ===== 6. DEPARTMENTS ENDPOINTS =====
+
+/**
+ * @route GET /api/departments
+ * @description List all hospital departments with head of department information
+ * @access Private
+ */
+app.get('/api/departments', authenticateToken, apiLimiter, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('departments')
@@ -727,7 +1366,7 @@ app.get('/api/departments', authenticateToken, async (req, res) => {
     
     if (error) throw error;
     
-    const transformed = (data || []).map(item => ({
+    const transformedData = (data || []).map(item => ({
       ...item,
       head_of_department: {
         full_name: item.medical_staff?.full_name || null,
@@ -735,26 +1374,30 @@ app.get('/api/departments', authenticateToken, async (req, res) => {
       }
     }));
     
-    res.json(transformed);
-    
+    res.json(transformedData);
   } catch (error) {
-    console.error('Departments error:', error);
-    res.json([]);
+    res.status(500).json({ error: 'Failed to fetch departments', message: error.message });
   }
 });
 
-app.get('/api/departments/:id', authenticateToken, async (req, res) => {
+/**
+ * @route GET /api/departments/:id
+ * @description Get detailed information for a specific department
+ * @access Private
+ */
+app.get('/api/departments/:id', authenticateToken, apiLimiter, async (req, res) => {
   try {
     const { id } = req.params;
-    
     const { data, error } = await supabase
       .from('departments')
-      .select('*, medical_staff!departments_head_of_department_id_fkey(full_name, professional_email)')
+      .select('*, medical_staff!departments_head_of_department_id_fkey(full_name, professional_email, staff_type)')
       .eq('id', id)
       .single();
     
     if (error) {
-      if (error.code === 'PGRST116') return res.status(404).json({ error: 'Department not found' });
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({ error: 'Department not found' });
+      }
       throw error;
     }
     
@@ -762,24 +1405,28 @@ app.get('/api/departments/:id', authenticateToken, async (req, res) => {
       ...data,
       head_of_department: {
         full_name: data.medical_staff?.full_name || null,
-        professional_email: data.medical_staff?.professional_email || null
+        professional_email: data.medical_staff?.professional_email || null,
+        staff_type: data.medical_staff?.staff_type || null
       }
     };
     
     res.json(transformed);
-    
   } catch (error) {
-    console.error('Department details error:', error);
-    res.status(500).json({ error: 'Failed to fetch department details' });
+    res.status(500).json({ error: 'Failed to fetch department details', message: error.message });
   }
 });
 
+/**
+ * @route POST /api/departments
+ * @description Create new hospital department
+ * @access Private
+ */
 app.post('/api/departments', authenticateToken, checkPermission('departments', 'create'), validate(schemas.department), async (req, res) => {
   try {
-    const deptData = {
-      ...req.validatedData,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+    const deptData = { 
+      ...req.validatedData, 
+      created_at: new Date().toISOString(), 
+      updated_at: new Date().toISOString() 
     };
     
     const { data, error } = await supabase
@@ -791,19 +1438,22 @@ app.post('/api/departments', authenticateToken, checkPermission('departments', '
     if (error) throw error;
     
     res.status(201).json(data);
-    
   } catch (error) {
-    console.error('Create department error:', error);
-    res.status(500).json({ error: 'Failed to create department' });
+    res.status(500).json({ error: 'Failed to create department', message: error.message });
   }
 });
 
+/**
+ * @route PUT /api/departments/:id
+ * @description Update existing department information
+ * @access Private
+ */
 app.put('/api/departments/:id', authenticateToken, checkPermission('departments', 'update'), validate(schemas.department), async (req, res) => {
   try {
     const { id } = req.params;
-    const deptData = {
-      ...req.validatedData,
-      updated_at: new Date().toISOString()
+    const deptData = { 
+      ...req.validatedData, 
+      updated_at: new Date().toISOString() 
     };
     
     const { data, error } = await supabase
@@ -814,20 +1464,26 @@ app.put('/api/departments/:id', authenticateToken, checkPermission('departments'
       .single();
     
     if (error) {
-      if (error.code === 'PGRST116') return res.status(404).json({ error: 'Department not found' });
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({ error: 'Department not found' });
+      }
       throw error;
     }
     
     res.json(data);
-    
   } catch (error) {
-    console.error('Update department error:', error);
-    res.status(500).json({ error: 'Failed to update department' });
+    res.status(500).json({ error: 'Failed to update department', message: error.message });
   }
 });
 
-// 6. TRAINING UNITS ENDPOINTS
-app.get('/api/training-units', authenticateToken, async (req, res) => {
+// ===== 7. TRAINING UNITS ENDPOINTS =====
+
+/**
+ * @route GET /api/training-units
+ * @description List all clinical training units with department and supervisor info
+ * @access Private
+ */
+app.get('/api/training-units', authenticateToken, apiLimiter, async (req, res) => {
   try {
     const { department_id, unit_status } = req.query;
     
@@ -843,27 +1499,32 @@ app.get('/api/training-units', authenticateToken, async (req, res) => {
     
     if (error) throw error;
     
-    const transformed = (data || []).map(item => ({
+    const transformedData = (data || []).map(item => ({
       ...item,
-      department: item.departments ? { name: item.departments.name, code: item.departments.code } : null,
+      department: item.departments ? { 
+        name: item.departments.name, 
+        code: item.departments.code 
+      } : null,
       supervisor: { 
         full_name: item.medical_staff?.full_name || null, 
         professional_email: item.medical_staff?.professional_email || null 
       }
     }));
     
-    res.json(transformed);
-    
+    res.json(transformedData);
   } catch (error) {
-    console.error('Training units error:', error);
-    res.json([]);
+    res.status(500).json({ error: 'Failed to fetch training units', message: error.message });
   }
 });
 
-app.get('/api/training-units/:id', authenticateToken, async (req, res) => {
+/**
+ * @route GET /api/training-units/:id
+ * @description Get detailed information for a specific training unit
+ * @access Private
+ */
+app.get('/api/training-units/:id', authenticateToken, apiLimiter, async (req, res) => {
   try {
     const { id } = req.params;
-    
     const { data, error } = await supabase
       .from('training_units')
       .select('*, departments!training_units_department_id_fkey(name, code), medical_staff!training_units_supervisor_id_fkey(full_name, professional_email)')
@@ -871,13 +1532,18 @@ app.get('/api/training-units/:id', authenticateToken, async (req, res) => {
       .single();
     
     if (error) {
-      if (error.code === 'PGRST116') return res.status(404).json({ error: 'Training unit not found' });
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({ error: 'Training unit not found' });
+      }
       throw error;
     }
     
     const transformed = {
       ...data,
-      department: data.departments ? { name: data.departments.name, code: data.departments.code } : null,
+      department: data.departments ? { 
+        name: data.departments.name, 
+        code: data.departments.code 
+      } : null,
       supervisor: { 
         full_name: data.medical_staff?.full_name || null, 
         professional_email: data.medical_staff?.professional_email || null 
@@ -885,20 +1551,22 @@ app.get('/api/training-units/:id', authenticateToken, async (req, res) => {
     };
     
     res.json(transformed);
-    
   } catch (error) {
-    console.error('Training unit details error:', error);
-    res.status(500).json({ error: 'Failed to fetch training unit details' });
+    res.status(500).json({ error: 'Failed to fetch training unit details', message: error.message });
   }
 });
 
-app.post('/api/training-units', authenticateToken, checkPermission('training_units', 'create'), async (req, res) => {
+/**
+ * @route POST /api/training-units
+ * @description Create new clinical training unit
+ * @access Private
+ */
+app.post('/api/training-units', authenticateToken, checkPermission('training_units', 'create'), validate(schemas.trainingUnit), async (req, res) => {
   try {
-    const unitData = {
-      ...req.body,
-      id: req.body.id || generateId('TU'),
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+    const unitData = { 
+      ...req.validatedData, 
+      created_at: new Date().toISOString(), 
+      updated_at: new Date().toISOString() 
     };
     
     const { data, error } = await supabase
@@ -910,19 +1578,22 @@ app.post('/api/training-units', authenticateToken, checkPermission('training_uni
     if (error) throw error;
     
     res.status(201).json(data);
-    
   } catch (error) {
-    console.error('Create training unit error:', error);
-    res.status(500).json({ error: 'Failed to create training unit' });
+    res.status(500).json({ error: 'Failed to create training unit', message: error.message });
   }
 });
 
-app.put('/api/training-units/:id', authenticateToken, checkPermission('training_units', 'update'), async (req, res) => {
+/**
+ * @route PUT /api/training-units/:id
+ * @description Update existing training unit information
+ * @access Private
+ */
+app.put('/api/training-units/:id', authenticateToken, checkPermission('training_units', 'update'), validate(schemas.trainingUnit), async (req, res) => {
   try {
     const { id } = req.params;
-    const unitData = {
-      ...req.body,
-      updated_at: new Date().toISOString()
+    const unitData = { 
+      ...req.validatedData, 
+      updated_at: new Date().toISOString() 
     };
     
     const { data, error } = await supabase
@@ -933,71 +1604,90 @@ app.put('/api/training-units/:id', authenticateToken, checkPermission('training_
       .single();
     
     if (error) {
-      if (error.code === 'PGRST116') return res.status(404).json({ error: 'Training unit not found' });
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({ error: 'Training unit not found' });
+      }
       throw error;
     }
     
     res.json(data);
-    
   } catch (error) {
-    console.error('Update training unit error:', error);
-    res.status(500).json({ error: 'Failed to update training unit' });
+    res.status(500).json({ error: 'Failed to update training unit', message: error.message });
   }
 });
 
-// 7. ROTATIONS ENDPOINTS (Vue Compatible)
-app.get('/api/rotations', authenticateToken, async (req, res) => {
+// ===== 8. RESIDENT ROTATIONS ENDPOINTS =====
+
+/**
+ * @route GET /api/rotations
+ * @description List all resident rotations with resident, supervisor, and unit info
+ * @access Private
+ */
+app.get('/api/rotations', authenticateToken, apiLimiter, async (req, res) => {
   try {
-    const { resident_id, rotation_status, training_unit_id } = req.query;
+    const { resident_id, rotation_status, training_unit_id, start_date, end_date, page = 1, limit = 100 } = req.query;
+    const offset = (page - 1) * limit;
     
     let query = supabase
       .from('resident_rotations')
       .select(`
         *,
         resident:medical_staff!resident_rotations_resident_id_fkey(full_name, professional_email, staff_type),
+        supervising_attending:medical_staff!resident_rotations_supervising_attending_id_fkey(full_name, professional_email),
         training_unit:training_units!resident_rotations_training_unit_id_fkey(unit_name, unit_code)
-      `)
-      .order('start_date', { ascending: false });
+      `, { count: 'exact' });
     
     if (resident_id) query = query.eq('resident_id', resident_id);
     if (rotation_status) query = query.eq('rotation_status', rotation_status);
     if (training_unit_id) query = query.eq('training_unit_id', training_unit_id);
+    if (start_date) query = query.gte('start_date', start_date);
+    if (end_date) query = query.lte('end_date', end_date);
     
-    const { data, error } = await query;
+    const { data, error, count } = await query
+      .order('start_date', { ascending: false })
+      .range(offset, offset + limit - 1);
     
     if (error) throw error;
     
-    // Transform for Vue frontend compatibility
-    const transformed = (data || []).map(rotation => ({
-      ...rotation,
-      rotation_id: rotation.id,
-      rotation_start_date: rotation.start_date,
-      rotation_end_date: rotation.end_date,
-      resident_name: rotation.resident?.full_name,
-      unit_name: rotation.training_unit?.unit_name,
-      resident: rotation.resident ? {
-        full_name: rotation.resident.full_name || null,
-        professional_email: rotation.resident.professional_email || null,
-        staff_type: rotation.resident.staff_type || null
+    const transformedData = (data || []).map(item => ({
+      ...item,
+      resident: item.resident ? {
+        full_name: item.resident.full_name || null,
+        professional_email: item.resident.professional_email || null,
+        staff_type: item.resident.staff_type || null
       } : null,
-      training_unit: rotation.training_unit ? {
-        unit_name: rotation.training_unit.unit_name,
-        unit_code: rotation.training_unit.unit_code
+      supervising_attending: item.supervising_attending ? {
+        full_name: item.supervising_attending.full_name || null,
+        professional_email: item.supervising_attending.professional_email || null
+      } : null,
+      training_unit: item.training_unit ? {
+        unit_name: item.training_unit.unit_name,
+        unit_code: item.training_unit.unit_code
       } : null
     }));
     
-    res.json(transformed);
-    
+    res.json({
+      data: transformedData,
+      pagination: { 
+        page: parseInt(page), 
+        limit: parseInt(limit), 
+        total: count || 0, 
+        totalPages: Math.ceil((count || 0) / limit) 
+      }
+    });
   } catch (error) {
-    console.error('Rotations error:', error);
-    res.json([]);
+    res.status(500).json({ error: 'Failed to fetch rotations', message: error.message });
   }
 });
 
-app.get('/api/rotations/current', authenticateToken, async (req, res) => {
+/**
+ * @route GET /api/rotations/current
+ * @description Get currently active rotations
+ * @access Private
+ */
+app.get('/api/rotations/current', authenticateToken, apiLimiter, async (req, res) => {
   try {
     const today = formatDate(new Date());
-    
     const { data, error } = await supabase
       .from('resident_rotations')
       .select(`
@@ -1012,24 +1702,20 @@ app.get('/api/rotations/current', authenticateToken, async (req, res) => {
     
     if (error) throw error;
     
-    const transformed = (data || []).map(rotation => ({
-      ...rotation,
-      rotation_start_date: rotation.start_date,
-      rotation_end_date: rotation.end_date
-    }));
-    
-    res.json(transformed);
-    
+    res.json(data || []);
   } catch (error) {
-    console.error('Current rotations error:', error);
-    res.json([]);
+    res.status(500).json({ error: 'Failed to fetch current rotations', message: error.message });
   }
 });
 
-app.get('/api/rotations/upcoming', authenticateToken, async (req, res) => {
+/**
+ * @route GET /api/rotations/upcoming
+ * @description Get upcoming rotations
+ * @access Private
+ */
+app.get('/api/rotations/upcoming', authenticateToken, apiLimiter, async (req, res) => {
   try {
     const today = formatDate(new Date());
-    
     const { data, error } = await supabase
       .from('resident_rotations')
       .select(`
@@ -1043,27 +1729,24 @@ app.get('/api/rotations/upcoming', authenticateToken, async (req, res) => {
     
     if (error) throw error;
     
-    const transformed = (data || []).map(rotation => ({
-      ...rotation,
-      rotation_start_date: rotation.start_date,
-      rotation_end_date: rotation.end_date
-    }));
-    
-    res.json(transformed);
-    
+    res.json(data || []);
   } catch (error) {
-    console.error('Upcoming rotations error:', error);
-    res.json([]);
+    res.status(500).json({ error: 'Failed to fetch upcoming rotations', message: error.message });
   }
 });
 
+/**
+ * @route POST /api/rotations
+ * @description Assign resident to a training unit rotation
+ * @access Private
+ */
 app.post('/api/rotations', authenticateToken, checkPermission('resident_rotations', 'create'), validate(schemas.rotation), async (req, res) => {
   try {
-    const rotationData = {
-      ...req.validatedData,
-      id: req.validatedData.id || generateId('ROT'),
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+    const rotationData = { 
+      ...req.validatedData, 
+      rotation_id: generateId('ROT'), 
+      created_at: new Date().toISOString(), 
+      updated_at: new Date().toISOString() 
     };
     
     const { data, error } = await supabase
@@ -1074,28 +1757,23 @@ app.post('/api/rotations', authenticateToken, checkPermission('resident_rotation
     
     if (error) throw error;
     
-    // Transform response for Vue
-    const transformed = {
-      ...data,
-      rotation_id: data.id,
-      rotation_start_date: data.start_date,
-      rotation_end_date: data.end_date
-    };
-    
-    res.status(201).json(transformed);
-    
+    res.status(201).json(data);
   } catch (error) {
-    console.error('Create rotation error:', error);
-    res.status(500).json({ error: 'Failed to create rotation' });
+    res.status(500).json({ error: 'Failed to create rotation', message: error.message });
   }
 });
 
+/**
+ * @route PUT /api/rotations/:id
+ * @description Update existing rotation assignment
+ * @access Private
+ */
 app.put('/api/rotations/:id', authenticateToken, checkPermission('resident_rotations', 'update'), validate(schemas.rotation), async (req, res) => {
   try {
     const { id } = req.params;
-    const rotationData = {
-      ...req.validatedData,
-      updated_at: new Date().toISOString()
+    const rotationData = { 
+      ...req.validatedData, 
+      updated_at: new Date().toISOString() 
     };
     
     const { data, error } = await supabase
@@ -1106,30 +1784,26 @@ app.put('/api/rotations/:id', authenticateToken, checkPermission('resident_rotat
       .single();
     
     if (error) {
-      if (error.code === 'PGRST116') return res.status(404).json({ error: 'Rotation not found' });
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({ error: 'Rotation not found' });
+      }
       throw error;
     }
     
-    // Transform response for Vue
-    const transformed = {
-      ...data,
-      rotation_id: data.id,
-      rotation_start_date: data.start_date,
-      rotation_end_date: data.end_date
-    };
-    
-    res.json(transformed);
-    
+    res.json(data);
   } catch (error) {
-    console.error('Update rotation error:', error);
-    res.status(500).json({ error: 'Failed to update rotation' });
+    res.status(500).json({ error: 'Failed to update rotation', message: error.message });
   }
 });
 
-app.delete('/api/rotations/:id', authenticateToken, checkPermission('resident_rotations', 'delete'), async (req, res) => {
+/**
+ * @route DELETE /api/rotations/:id
+ * @description Cancel a resident rotation
+ * @access Private
+ */
+app.delete('/api/rotations/:id', authenticateToken, checkPermission('resident_rotations', 'delete'), apiLimiter, async (req, res) => {
   try {
     const { id } = req.params;
-    
     const { error } = await supabase
       .from('resident_rotations')
       .update({ 
@@ -1141,15 +1815,19 @@ app.delete('/api/rotations/:id', authenticateToken, checkPermission('resident_ro
     if (error) throw error;
     
     res.json({ message: 'Rotation cancelled successfully' });
-    
   } catch (error) {
-    console.error('Delete rotation error:', error);
-    res.status(500).json({ error: 'Failed to cancel rotation' });
+    res.status(500).json({ error: 'Failed to cancel rotation', message: error.message });
   }
 });
 
-// 8. ON-CALL SCHEDULE ENDPOINTS
-app.get('/api/oncall', authenticateToken, async (req, res) => {
+// ===== 9. ON-CALL SCHEDULE ENDPOINTS =====
+
+/**
+ * @route GET /api/oncall
+ * @description List all on-call schedules with physician information
+ * @access Private
+ */
+app.get('/api/oncall', authenticateToken, apiLimiter, async (req, res) => {
   try {
     const { start_date, end_date, physician_id } = req.query;
     
@@ -1164,15 +1842,13 @@ app.get('/api/oncall', authenticateToken, async (req, res) => {
     
     if (start_date) query = query.gte('duty_date', start_date);
     if (end_date) query = query.lte('duty_date', end_date);
-    if (physician_id) {
-      query = query.or(`primary_physician_id.eq.${physician_id},backup_physician_id.eq.${physician_id}`);
-    }
+    if (physician_id) query = query.or(`primary_physician_id.eq.${physician_id},backup_physician_id.eq.${physician_id}`);
     
     const { data, error } = await query;
     
     if (error) throw error;
     
-    const transformed = (data || []).map(item => ({
+    const transformedData = (data || []).map(item => ({
       ...item,
       primary_physician: item.primary_physician ? {
         full_name: item.primary_physician.full_name || null,
@@ -1186,37 +1862,43 @@ app.get('/api/oncall', authenticateToken, async (req, res) => {
       } : null
     }));
     
-    res.json(transformed);
-    
+    res.json(transformedData);
   } catch (error) {
-    console.error('On-call error:', error);
-    res.json([]);
+    res.status(500).json({ error: 'Failed to fetch on-call schedule', message: error.message });
   }
 });
 
-app.get('/api/oncall/today', authenticateToken, async (req, res) => {
+/**
+ * @route GET /api/oncall/today
+ * @description Get today's on-call schedule
+ * @access Private
+ */
+app.get('/api/oncall/today', authenticateToken, apiLimiter, async (req, res) => {
   try {
     const today = formatDate(new Date());
-    
     const { data, error } = await supabase
       .from('oncall_schedule')
       .select(`
         *,
-        primary_physician:medical_staff!oncall_schedule_primary_physician_id_fkey(full_name, professional_email, mobile_phone)
+        primary_physician:medical_staff!oncall_schedule_primary_physician_id_fkey(full_name, professional_email, mobile_phone),
+        backup_physician:medical_staff!oncall_schedule_backup_physician_id_fkey(full_name, professional_email, mobile_phone)
       `)
       .eq('duty_date', today);
     
     if (error) throw error;
     
     res.json(data || []);
-    
   } catch (error) {
-    console.error('Today on-call error:', error);
-    res.json([]);
+    res.status(500).json({ error: 'Failed to fetch today\'s on-call', message: error.message });
   }
 });
 
-app.get('/api/oncall/upcoming', authenticateToken, async (req, res) => {
+/**
+ * @route GET /api/oncall/upcoming
+ * @description Get upcoming on-call schedule (next 7 days)
+ * @access Private
+ */
+app.get('/api/oncall/upcoming', authenticateToken, apiLimiter, async (req, res) => {
   try {
     const today = formatDate(new Date());
     const nextWeek = formatDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
@@ -1234,70 +1916,81 @@ app.get('/api/oncall/upcoming', authenticateToken, async (req, res) => {
     if (error) throw error;
     
     res.json(data || []);
-    
   } catch (error) {
-    console.error('Upcoming on-call error:', error);
-    res.json([]);
+    res.status(500).json({ error: 'Failed to fetch upcoming on-call', message: error.message });
   }
 });
 
+/**
+ * @route POST /api/oncall
+ * @description Schedule physician for on-call duty
+ * @access Private
+ */
 app.post('/api/oncall', authenticateToken, checkPermission('oncall_schedule', 'create'), validate(schemas.onCall), async (req, res) => {
   try {
-    const oncallData = {
-      ...req.validatedData,
-      id: req.validatedData.id || generateId('SCH'),
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+    const scheduleData = { 
+      ...req.validatedData, 
+      schedule_id: req.validatedData.schedule_id || generateId('SCH'), 
+      created_by: req.user.id, 
+      created_at: new Date().toISOString(), 
+      updated_at: new Date().toISOString() 
     };
     
     const { data, error } = await supabase
       .from('oncall_schedule')
-      .insert([oncallData])
+      .insert([scheduleData])
       .select()
       .single();
     
     if (error) throw error;
     
     res.status(201).json(data);
-    
   } catch (error) {
-    console.error('Create on-call error:', error);
-    res.status(500).json({ error: 'Failed to create on-call schedule' });
+    res.status(500).json({ error: 'Failed to create on-call schedule', message: error.message });
   }
 });
 
+/**
+ * @route PUT /api/oncall/:id
+ * @description Update existing on-call schedule
+ * @access Private
+ */
 app.put('/api/oncall/:id', authenticateToken, checkPermission('oncall_schedule', 'update'), validate(schemas.onCall), async (req, res) => {
   try {
     const { id } = req.params;
-    const oncallData = {
-      ...req.validatedData,
-      updated_at: new Date().toISOString()
+    const scheduleData = { 
+      ...req.validatedData, 
+      updated_at: new Date().toISOString() 
     };
     
     const { data, error } = await supabase
       .from('oncall_schedule')
-      .update(oncallData)
+      .update(scheduleData)
       .eq('id', id)
       .select()
       .single();
     
     if (error) {
-      if (error.code === 'PGRST116') return res.status(404).json({ error: 'Schedule not found' });
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({ error: 'Schedule not found' });
+      }
       throw error;
     }
     
     res.json(data);
-    
   } catch (error) {
-    console.error('Update on-call error:', error);
-    res.status(500).json({ error: 'Failed to update on-call schedule' });
+    res.status(500).json({ error: 'Failed to update on-call schedule', message: error.message });
   }
 });
 
-app.delete('/api/oncall/:id', authenticateToken, checkPermission('oncall_schedule', 'delete'), async (req, res) => {
+/**
+ * @route DELETE /api/oncall/:id
+ * @description Remove on-call schedule entry
+ * @access Private
+ */
+app.delete('/api/oncall/:id', authenticateToken, checkPermission('oncall_schedule', 'delete'), apiLimiter, async (req, res) => {
   try {
     const { id } = req.params;
-    
     const { error } = await supabase
       .from('oncall_schedule')
       .delete()
@@ -1306,17 +1999,21 @@ app.delete('/api/oncall/:id', authenticateToken, checkPermission('oncall_schedul
     if (error) throw error;
     
     res.json({ message: 'On-call schedule deleted successfully' });
-    
   } catch (error) {
-    console.error('Delete on-call error:', error);
-    res.status(500).json({ error: 'Failed to delete on-call schedule' });
+    res.status(500).json({ error: 'Failed to delete on-call schedule', message: error.message });
   }
 });
 
-// 9. ABSENCES ENDPOINTS (Vue Compatible)
-app.get('/api/absences', authenticateToken, async (req, res) => {
+// ===== 10. STAFF ABSENCES ENDPOINTS =====
+
+/**
+ * @route GET /api/absences
+ * @description List all staff leave/absence requests
+ * @access Private
+ */
+app.get('/api/absences', authenticateToken, apiLimiter, async (req, res) => {
   try {
-    const { staff_member_id, status, start_date } = req.query;
+    const { staff_member_id, approval_status, start_date, end_date } = req.query;
     
     let query = supabase
       .from('leave_requests')
@@ -1324,55 +2021,40 @@ app.get('/api/absences', authenticateToken, async (req, res) => {
         *,
         staff_member:medical_staff!leave_requests_staff_member_id_fkey(full_name, professional_email, department_id)
       `)
-      .order('leave_start_date', { ascending: false });
+      .order('leave_start_date');
     
     if (staff_member_id) query = query.eq('staff_member_id', staff_member_id);
-    if (status) {
-      if (status === 'upcoming' || status === 'active') {
-        query = query.eq('approval_status', 'approved');
-      } else {
-        query = query.eq('approval_status', status);
-      }
-    }
+    if (approval_status) query = query.eq('approval_status', approval_status);
     if (start_date) query = query.gte('leave_start_date', start_date);
+    if (end_date) query = query.lte('leave_end_date', end_date);
     
     const { data, error } = await query;
     
     if (error) throw error;
     
-    // Transform for Vue frontend compatibility
-    const transformed = (data || []).map(absence => ({
-      ...absence,
-      absence_reason: absence.leave_category,
-      start_date: absence.leave_start_date,
-      end_date: absence.leave_end_date,
-      status: absence.approval_status === 'approved' ? 
-        (new Date(absence.leave_start_date) > new Date() ? 'upcoming' : 'active') : 
-        absence.approval_status,
-      total_days: calculateDays(absence.leave_start_date, absence.leave_end_date),
-      needs_coverage: absence.coverage_required,
-      coverage_notes: absence.leave_reason,
-      replacement_staff_id: absence.replacement_staff_id,
-      staff_name: absence.staff_member?.full_name,
-      staff_member: absence.staff_member ? {
-        full_name: absence.staff_member.full_name || null,
-        professional_email: absence.staff_member.professional_email || null,
-        department_id: absence.staff_member.department_id || null
+    const transformedData = (data || []).map(item => ({
+      ...item,
+      staff_member: item.staff_member ? {
+        full_name: item.staff_member.full_name || null,
+        professional_email: item.staff_member.professional_email || null,
+        department_id: item.staff_member.department_id || null
       } : null
     }));
     
-    res.json(transformed);
-    
+    res.json(transformedData);
   } catch (error) {
-    console.error('Absences error:', error);
-    res.json([]);
+    res.status(500).json({ error: 'Failed to fetch absences', message: error.message });
   }
 });
 
-app.get('/api/absences/upcoming', authenticateToken, async (req, res) => {
+/**
+ * @route GET /api/absences/upcoming
+ * @description Get upcoming absences
+ * @access Private
+ */
+app.get('/api/absences/upcoming', authenticateToken, apiLimiter, async (req, res) => {
   try {
     const today = formatDate(new Date());
-    
     const { data, error } = await supabase
       .from('leave_requests')
       .select(`
@@ -1385,24 +2067,18 @@ app.get('/api/absences/upcoming', authenticateToken, async (req, res) => {
     
     if (error) throw error;
     
-    const transformed = (data || []).map(absence => ({
-      ...absence,
-      absence_reason: absence.leave_category,
-      start_date: absence.leave_start_date,
-      end_date: absence.leave_end_date,
-      status: 'upcoming',
-      staff_name: absence.staff_member?.full_name
-    }));
-    
-    res.json(transformed);
-    
+    res.json(data || []);
   } catch (error) {
-    console.error('Upcoming absences error:', error);
-    res.json([]);
+    res.status(500).json({ error: 'Failed to fetch upcoming absences', message: error.message });
   }
 });
 
-app.get('/api/absences/pending', authenticateToken, async (req, res) => {
+/**
+ * @route GET /api/absences/pending
+ * @description Get pending absence requests
+ * @access Private
+ */
+app.get('/api/absences/pending', authenticateToken, apiLimiter, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('leave_requests')
@@ -1415,31 +2091,25 @@ app.get('/api/absences/pending', authenticateToken, async (req, res) => {
     
     if (error) throw error;
     
-    const transformed = (data || []).map(absence => ({
-      ...absence,
-      absence_reason: absence.leave_category,
-      start_date: absence.leave_start_date,
-      end_date: absence.leave_end_date,
-      status: 'pending',
-      staff_name: absence.staff_member?.full_name
-    }));
-    
-    res.json(transformed);
-    
+    res.json(data || []);
   } catch (error) {
-    console.error('Pending absences error:', error);
-    res.json([]);
+    res.status(500).json({ error: 'Failed to fetch pending absences', message: error.message });
   }
 });
 
+/**
+ * @route POST /api/absences
+ * @description Submit new leave/absence request
+ * @access Private
+ */
 app.post('/api/absences', authenticateToken, checkPermission('staff_absence', 'create'), validate(schemas.absence), async (req, res) => {
   try {
-    const absenceData = {
-      ...req.validatedData,
-      id: req.validatedData.id || generateId('ABS'),
+    const absenceData = { 
+      ...req.validatedData, 
+      request_id: generateId('ABS'), 
       total_days: calculateDays(req.validatedData.leave_start_date, req.validatedData.leave_end_date),
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+      created_at: new Date().toISOString(), 
+      updated_at: new Date().toISOString() 
     };
     
     const { data, error } = await supabase
@@ -1450,35 +2120,24 @@ app.post('/api/absences', authenticateToken, checkPermission('staff_absence', 'c
     
     if (error) throw error;
     
-    // Transform for Vue frontend
-    const transformed = {
-      ...data,
-      absence_reason: data.leave_category,
-      start_date: data.leave_start_date,
-      end_date: data.leave_end_date,
-      status: data.approval_status === 'approved' ? 
-        (new Date(data.leave_start_date) > new Date() ? 'upcoming' : 'active') : 
-        data.approval_status,
-      total_days: calculateDays(data.leave_start_date, data.leave_end_date),
-      needs_coverage: data.coverage_required,
-      coverage_notes: data.leave_reason
-    };
-    
-    res.status(201).json(transformed);
-    
+    res.status(201).json(data);
   } catch (error) {
-    console.error('Create absence error:', error);
-    res.status(500).json({ error: 'Failed to create absence' });
+    res.status(500).json({ error: 'Failed to create absence record', message: error.message });
   }
 });
 
+/**
+ * @route PUT /api/absences/:id
+ * @description Update existing leave request
+ * @access Private
+ */
 app.put('/api/absences/:id', authenticateToken, checkPermission('staff_absence', 'update'), validate(schemas.absence), async (req, res) => {
   try {
     const { id } = req.params;
-    const absenceData = {
-      ...req.validatedData,
+    const absenceData = { 
+      ...req.validatedData, 
       total_days: calculateDays(req.validatedData.leave_start_date, req.validatedData.leave_end_date),
-      updated_at: new Date().toISOString()
+      updated_at: new Date().toISOString() 
     };
     
     const { data, error } = await supabase
@@ -1489,37 +2148,27 @@ app.put('/api/absences/:id', authenticateToken, checkPermission('staff_absence',
       .single();
     
     if (error) {
-      if (error.code === 'PGRST116') return res.status(404).json({ error: 'Absence not found' });
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({ error: 'Absence record not found' });
+      }
       throw error;
     }
     
-    // Transform for Vue frontend
-    const transformed = {
-      ...data,
-      absence_reason: data.leave_category,
-      start_date: data.leave_start_date,
-      end_date: data.leave_end_date,
-      status: data.approval_status === 'approved' ? 
-        (new Date(data.leave_start_date) > new Date() ? 'upcoming' : 'active') : 
-        data.approval_status,
-      total_days: calculateDays(data.leave_start_date, data.leave_end_date),
-      needs_coverage: data.coverage_required,
-      coverage_notes: data.leave_reason
-    };
-    
-    res.json(transformed);
-    
+    res.json(data);
   } catch (error) {
-    console.error('Update absence error:', error);
-    res.status(500).json({ error: 'Failed to update absence' });
+    res.status(500).json({ error: 'Failed to update absence record', message: error.message });
   }
 });
 
-app.put('/api/absences/:id/approve', authenticateToken, checkPermission('staff_absence', 'update'), async (req, res) => {
+/**
+ * @route PUT /api/absences/:id/approve
+ * @description Approve or reject a leave request
+ * @access Private
+ */
+app.put('/api/absences/:id/approve', authenticateToken, checkPermission('staff_absence', 'update'), apiLimiter, async (req, res) => {
   try {
     const { id } = req.params;
     const { approved, review_notes } = req.body;
-    
     const updateData = {
       approval_status: approved ? 'approved' : 'rejected',
       reviewed_by: req.user.id,
@@ -1538,18 +2187,21 @@ app.put('/api/absences/:id/approve', authenticateToken, checkPermission('staff_a
     if (error) throw error;
     
     res.json(data);
-    
   } catch (error) {
-    console.error('Approve absence error:', error);
-    res.status(500).json({ error: 'Failed to update absence status' });
+    res.status(500).json({ error: 'Failed to update absence status', message: error.message });
   }
 });
 
-// 10. ANNOUNCEMENTS ENDPOINTS
-app.get('/api/announcements', authenticateToken, async (req, res) => {
+// ===== 11. ANNOUNCEMENTS ENDPOINTS =====
+
+/**
+ * @route GET /api/announcements
+ * @description List all active announcements
+ * @access Private
+ */
+app.get('/api/announcements', authenticateToken, apiLimiter, async (req, res) => {
   try {
     const today = formatDate(new Date());
-    
     const { data, error } = await supabase
       .from('department_announcements')
       .select('*')
@@ -1560,17 +2212,19 @@ app.get('/api/announcements', authenticateToken, async (req, res) => {
     if (error) throw error;
     
     res.json(data || []);
-    
   } catch (error) {
-    console.error('Announcements error:', error);
-    res.json([]);
+    res.status(500).json({ error: 'Failed to fetch announcements', message: error.message });
   }
 });
 
-app.get('/api/announcements/urgent', authenticateToken, async (req, res) => {
+/**
+ * @route GET /api/announcements/urgent
+ * @description Get urgent announcements
+ * @access Private
+ */
+app.get('/api/announcements/urgent', authenticateToken, apiLimiter, async (req, res) => {
   try {
     const today = formatDate(new Date());
-    
     const { data, error } = await supabase
       .from('department_announcements')
       .select('*')
@@ -1582,20 +2236,24 @@ app.get('/api/announcements/urgent', authenticateToken, async (req, res) => {
     if (error) throw error;
     
     res.json(data || []);
-    
   } catch (error) {
-    console.error('Urgent announcements error:', error);
-    res.json([]);
+    res.status(500).json({ error: 'Failed to fetch urgent announcements', message: error.message });
   }
 });
 
+/**
+ * @route POST /api/announcements
+ * @description Create new announcement
+ * @access Private
+ */
 app.post('/api/announcements', authenticateToken, checkPermission('communications', 'create'), validate(schemas.announcement), async (req, res) => {
   try {
-    const announcementData = {
-      ...req.validatedData,
-      id: req.validatedData.id || generateId('ANN'),
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
+    const announcementData = { 
+      ...req.validatedData, 
+      announcement_id: generateId('ANN'), 
+      created_by: req.user.id, 
+      created_at: new Date().toISOString(), 
+      updated_at: new Date().toISOString() 
     };
     
     const { data, error } = await supabase
@@ -1607,19 +2265,22 @@ app.post('/api/announcements', authenticateToken, checkPermission('communication
     if (error) throw error;
     
     res.status(201).json(data);
-    
   } catch (error) {
-    console.error('Create announcement error:', error);
-    res.status(500).json({ error: 'Failed to create announcement' });
+    res.status(500).json({ error: 'Failed to create announcement', message: error.message });
   }
 });
 
+/**
+ * @route PUT /api/announcements/:id
+ * @description Update announcement
+ * @access Private
+ */
 app.put('/api/announcements/:id', authenticateToken, checkPermission('communications', 'update'), validate(schemas.announcement), async (req, res) => {
   try {
     const { id } = req.params;
-    const announcementData = {
-      ...req.validatedData,
-      updated_at: new Date().toISOString()
+    const announcementData = { 
+      ...req.validatedData, 
+      updated_at: new Date().toISOString() 
     };
     
     const { data, error } = await supabase
@@ -1630,22 +2291,26 @@ app.put('/api/announcements/:id', authenticateToken, checkPermission('communicat
       .single();
     
     if (error) {
-      if (error.code === 'PGRST116') return res.status(404).json({ error: 'Announcement not found' });
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({ error: 'Announcement not found' });
+      }
       throw error;
     }
     
     res.json(data);
-    
   } catch (error) {
-    console.error('Update announcement error:', error);
-    res.status(500).json({ error: 'Failed to update announcement' });
+    res.status(500).json({ error: 'Failed to update announcement', message: error.message });
   }
 });
 
-app.delete('/api/announcements/:id', authenticateToken, checkPermission('communications', 'delete'), async (req, res) => {
+/**
+ * @route DELETE /api/announcements/:id
+ * @description Remove announcement
+ * @access Private
+ */
+app.delete('/api/announcements/:id', authenticateToken, checkPermission('communications', 'delete'), apiLimiter, async (req, res) => {
   try {
     const { id } = req.params;
-    
     const { error } = await supabase
       .from('department_announcements')
       .delete()
@@ -1654,169 +2319,19 @@ app.delete('/api/announcements/:id', authenticateToken, checkPermission('communi
     if (error) throw error;
     
     res.json({ message: 'Announcement deleted successfully' });
-    
   } catch (error) {
-    console.error('Delete announcement error:', error);
-    res.status(500).json({ error: 'Failed to delete announcement' });
+    res.status(500).json({ error: 'Failed to delete announcement', message: error.message });
   }
 });
 
-// 11. SETTINGS ENDPOINTS
-app.get('/api/settings', authenticateToken, async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('system_settings')
-      .select('*')
-      .limit(1)
-      .single();
-    
-    if (error) {
-      // Return default settings
-      return res.json({
-        hospital_name: 'NeumoCare Hospital',
-        system_version: '5.0',
-        maintenance_mode: false,
-        default_department_id: null,
-        max_residents_per_unit: 10,
-        default_rotation_duration: 12,
-        enable_audit_logging: true,
-        require_mfa: false,
-        notifications_enabled: true,
-        absence_notifications: true,
-        announcement_notifications: true,
-        is_default: true
-      });
-    }
-    
-    res.json(data);
-    
-  } catch (error) {
-    console.error('Settings error:', error);
-    res.json({
-      hospital_name: 'NeumoCare Hospital',
-      system_version: '5.0',
-      maintenance_mode: false
-    });
-  }
-});
+// ===== 12. NOTIFICATION ENDPOINTS =====
 
-app.put('/api/settings', authenticateToken, checkPermission('system_settings', 'update'), async (req, res) => {
-  try {
-    const settingsData = {
-      ...req.body,
-      updated_at: new Date().toISOString()
-    };
-    
-    const { data, error } = await supabase
-      .from('system_settings')
-      .upsert([settingsData])
-      .select()
-      .single();
-    
-    if (error) throw error;
-    
-    res.json(data);
-    
-  } catch (error) {
-    console.error('Update settings error:', error);
-    res.status(500).json({ error: 'Failed to update settings' });
-  }
-});
-
-// 12. AUDIT LOGS ENDPOINT
-app.get('/api/audit-logs', authenticateToken, checkPermission('audit_logs', 'read'), async (req, res) => {
-  try {
-    const { page = 1, limit = 50, user_id, action, start_date } = req.query;
-    const offset = (page - 1) * limit;
-    
-    let query = supabase
-      .from('audit_logs')
-      .select(`
-        *,
-        user:app_users!audit_logs_user_id_fkey(full_name, email)
-      `, { count: 'exact' })
-      .order('created_at', { ascending: false });
-    
-    if (user_id) query = query.eq('user_id', user_id);
-    if (action) query = query.eq('action', action);
-    if (start_date) query = query.gte('created_at', start_date);
-    
-    const { data, error, count } = await query.range(offset, offset + limit - 1);
-    
-    if (error) throw error;
-    
-    res.json({
-      data: data || [],
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total: count || 0,
-        totalPages: Math.ceil((count || 0) / limit)
-      }
-    });
-    
-  } catch (error) {
-    console.error('Audit logs error:', error);
-    res.json([]);
-  }
-});
-
-// 13. USERS ENDPOINTS
-app.get('/api/users', authenticateToken, checkPermission('users', 'read'), async (req, res) => {
-  try {
-    const { page = 1, limit = 20, role, department_id, status } = req.query;
-    const offset = (page - 1) * limit;
-    
-    let query = supabase
-      .from('app_users')
-      .select('id, email, full_name, user_role, department_id, account_status, created_at', { count: 'exact' });
-    
-    if (role) query = query.eq('user_role', role);
-    if (department_id) query = query.eq('department_id', department_id);
-    if (status) query = query.eq('account_status', status);
-    
-    const { data, error, count } = await query
-      .order('created_at', { ascending: false })
-      .range(offset, offset + limit - 1);
-    
-    if (error) throw error;
-    
-    res.json({
-      data: data || [],
-      pagination: {
-        page: parseInt(page),
-        limit: parseInt(limit),
-        total: count || 0,
-        totalPages: Math.ceil((count || 0) / limit)
-      }
-    });
-    
-  } catch (error) {
-    console.error('Users error:', error);
-    res.json([]);
-  }
-});
-
-app.get('/api/users/profile', authenticateToken, async (req, res) => {
-  try {
-    const { data, error } = await supabase
-      .from('app_users')
-      .select('id, email, full_name, user_role, department_id, phone_number, created_at')
-      .eq('id', req.user.id)
-      .single();
-    
-    if (error) throw error;
-    
-    res.json(data);
-    
-  } catch (error) {
-    console.error('User profile error:', error);
-    res.status(500).json({ error: 'Failed to fetch user profile' });
-  }
-});
-
-// 14. NOTIFICATIONS ENDPOINTS
-app.get('/api/notifications', authenticateToken, async (req, res) => {
+/**
+ * @route GET /api/notifications
+ * @description Get user notifications
+ * @access Private
+ */
+app.get('/api/notifications', authenticateToken, apiLimiter, async (req, res) => {
   try {
     const { unread, limit = 50 } = req.query;
     
@@ -1834,14 +2349,63 @@ app.get('/api/notifications', authenticateToken, async (req, res) => {
     if (error) throw error;
     
     res.json(data || []);
-    
   } catch (error) {
-    console.error('Notifications error:', error);
-    res.json([]);
+    res.status(500).json({ error: 'Failed to fetch notifications', message: error.message });
   }
 });
 
-app.put('/api/notifications/mark-all-read', authenticateToken, async (req, res) => {
+/**
+ * @route GET /api/notifications/unread
+ * @description Get unread notification count
+ * @access Private
+ */
+app.get('/api/notifications/unread', authenticateToken, apiLimiter, async (req, res) => {
+  try {
+    const { count, error } = await supabase
+      .from('notifications')
+      .select('*', { count: 'exact', head: true })
+      .or(`recipient_id.eq.${req.user.id},recipient_role.eq.${req.user.role},recipient_role.eq.all`)
+      .eq('is_read', false);
+    
+    if (error) throw error;
+    
+    res.json({ unread_count: count || 0 });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch unread count', message: error.message });
+  }
+});
+
+/**
+ * @route PUT /api/notifications/:id/read
+ * @description Mark notification as read
+ * @access Private
+ */
+app.put('/api/notifications/:id/read', authenticateToken, apiLimiter, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { error } = await supabase
+      .from('notifications')
+      .update({ 
+        is_read: true, 
+        read_at: new Date().toISOString() 
+      })
+      .eq('id', id)
+      .or(`recipient_id.eq.${req.user.id},recipient_role.eq.${req.user.role},recipient_role.eq.all`);
+    
+    if (error) throw error;
+    
+    res.json({ message: 'Notification marked as read' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update notification', message: error.message });
+  }
+});
+
+/**
+ * @route PUT /api/notifications/mark-all-read
+ * @description Mark all notifications as read
+ * @access Private
+ */
+app.put('/api/notifications/mark-all-read', authenticateToken, apiLimiter, async (req, res) => {
   try {
     const { error } = await supabase
       .from('notifications')
@@ -1855,14 +2419,146 @@ app.put('/api/notifications/mark-all-read', authenticateToken, async (req, res) 
     if (error) throw error;
     
     res.json({ message: 'All notifications marked as read' });
-    
   } catch (error) {
-    console.error('Mark all read error:', error);
-    res.status(500).json({ error: 'Failed to update notifications' });
+    res.status(500).json({ error: 'Failed to update notifications', message: error.message });
   }
 });
 
-// 15. ATTACHMENTS ENDPOINTS
+/**
+ * @route DELETE /api/notifications/:id
+ * @description Delete notification
+ * @access Private
+ */
+app.delete('/api/notifications/:id', authenticateToken, apiLimiter, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { error } = await supabase
+      .from('notifications')
+      .delete()
+      .eq('id', id)
+      .or(`recipient_id.eq.${req.user.id},recipient_role.eq.${req.user.role},recipient_role.eq.all`);
+    
+    if (error) throw error;
+    
+    res.json({ message: 'Notification deleted' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete notification', message: error.message });
+  }
+});
+
+/**
+ * @route POST /api/notifications
+ * @description Create notification (admin only)
+ * @access Private
+ */
+app.post('/api/notifications', authenticateToken, checkPermission('communications', 'create'), validate(schemas.notification), async (req, res) => {
+  try {
+    const notificationData = {
+      ...req.validatedData,
+      created_by: req.user.id,
+      created_at: new Date().toISOString(),
+      is_read: false
+    };
+    
+    const { data, error } = await supabase
+      .from('notifications')
+      .insert([notificationData])
+      .select()
+      .single();
+    
+    if (error) throw error;
+    
+    res.status(201).json(data);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to create notification', message: error.message });
+  }
+});
+
+// ===== 13. AUDIT LOG ENDPOINTS =====
+
+/**
+ * @route GET /api/audit-logs
+ * @description Get audit logs (admin only)
+ * @access Private
+ */
+app.get('/api/audit-logs', authenticateToken, checkPermission('audit_logs', 'read'), apiLimiter, async (req, res) => {
+  try {
+    const { page = 1, limit = 50, user_id, resource, start_date, end_date } = req.query;
+    const offset = (page - 1) * limit;
+    
+    let query = supabase
+      .from('audit_logs')
+      .select(`
+        *,
+        user:app_users!audit_logs_user_id_fkey(full_name, email)
+      `, { count: 'exact' })
+      .order('created_at', { ascending: false });
+    
+    if (user_id) query = query.eq('user_id', user_id);
+    if (resource) query = query.eq('resource', resource);
+    if (start_date) query = query.gte('created_at', start_date);
+    if (end_date) query = query.lte('created_at', end_date);
+    
+    const { data, error, count } = await query
+      .range(offset, offset + limit - 1);
+    
+    if (error) throw error;
+    
+    res.json({
+      data: data || [],
+      pagination: { 
+        page: parseInt(page), 
+        limit: parseInt(limit), 
+        total: count || 0, 
+        totalPages: Math.ceil((count || 0) / limit) 
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch audit logs', message: error.message });
+  }
+});
+
+/**
+ * @route GET /api/audit-logs/user/:userId
+ * @description Get audit logs for specific user
+ * @access Private
+ */
+app.get('/api/audit-logs/user/:userId', authenticateToken, checkPermission('audit_logs', 'read'), apiLimiter, async (req, res) => {
+  try {
+    const { userId } = req.params;
+    const { page = 1, limit = 50 } = req.query;
+    const offset = (page - 1) * limit;
+    
+    const { data, error, count } = await supabase
+      .from('audit_logs')
+      .select('*', { count: 'exact' })
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .range(offset, offset + limit - 1);
+    
+    if (error) throw error;
+    
+    res.json({
+      data: data || [],
+      pagination: { 
+        page: parseInt(page), 
+        limit: parseInt(limit), 
+        total: count || 0, 
+        totalPages: Math.ceil((count || 0) / limit) 
+      }
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch user audit logs', message: error.message });
+  }
+});
+
+// ===== 14. ATTACHMENT ENDPOINTS =====
+
+/**
+ * @route POST /api/attachments/upload
+ * @description Upload file attachment
+ * @access Private
+ */
 app.post('/api/attachments/upload', authenticateToken, checkPermission('attachments', 'create'), upload.single('file'), async (req, res) => {
   try {
     if (!req.file) {
@@ -1896,52 +2592,317 @@ app.post('/api/attachments/upload', authenticateToken, checkPermission('attachme
       message: 'File uploaded successfully', 
       attachment: data 
     });
-    
   } catch (error) {
-    console.error('Upload attachment error:', error);
-    res.status(500).json({ error: 'Failed to upload file' });
+    res.status(500).json({ error: 'Failed to upload file', message: error.message });
   }
 });
 
-// 16. AVAILABLE DATA ENDPOINT (for dropdowns)
-app.get('/api/available-data', authenticateToken, async (req, res) => {
+/**
+ * @route GET /api/attachments/:id
+ * @description Get attachment details
+ * @access Private
+ */
+app.get('/api/attachments/:id', authenticateToken, apiLimiter, async (req, res) => {
   try {
-    const [departments, residents, attendings, trainingUnits, staff] = await Promise.all([
-      supabase.from('departments').select('id, name').eq('status', 'active').order('name'),
-      supabase.from('medical_staff').select('id, full_name, staff_id').eq('staff_type', 'medical_resident').eq('employment_status', 'active').order('full_name'),
-      supabase.from('medical_staff').select('id, full_name, staff_id').eq('staff_type', 'attending_physician').eq('employment_status', 'active').order('full_name'),
-      supabase.from('training_units').select('id, unit_name, unit_code').eq('unit_status', 'active').order('unit_name'),
-      supabase.from('medical_staff').select('id, full_name, staff_type').eq('employment_status', 'active').order('full_name')
+    const { id } = req.params;
+    const { data, error } = await supabase
+      .from('attachments')
+      .select('*')
+      .eq('id', id)
+      .single();
+    
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({ error: 'Attachment not found' });
+      }
+      throw error;
+    }
+    
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch attachment', message: error.message });
+  }
+});
+
+/**
+ * @route GET /api/attachments/entity/:entityType/:entityId
+ * @description Get attachments for specific entity
+ * @access Private
+ */
+app.get('/api/attachments/entity/:entityType/:entityId', authenticateToken, apiLimiter, async (req, res) => {
+  try {
+    const { entityType, entityId } = req.params;
+    const { data, error } = await supabase
+      .from('attachments')
+      .select('*')
+      .eq('entity_type', entityType)
+      .eq('entity_id', entityId)
+      .order('uploaded_at', { ascending: false });
+    
+    if (error) throw error;
+    
+    res.json(data || []);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch attachments', message: error.message });
+  }
+});
+
+/**
+ * @route DELETE /api/attachments/:id
+ * @description Delete attachment
+ * @access Private
+ */
+app.delete('/api/attachments/:id', authenticateToken, checkPermission('attachments', 'delete'), apiLimiter, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    // Get attachment first to delete file
+    const { data: attachment, error: fetchError } = await supabase
+      .from('attachments')
+      .select('file_path')
+      .eq('id', id)
+      .single();
+    
+    if (fetchError) throw fetchError;
+    
+    // Delete file from filesystem
+    if (attachment.file_path) {
+      const filePath = path.join(__dirname, attachment.file_path);
+      if (fs.existsSync(filePath)) {
+        fs.unlinkSync(filePath);
+      }
+    }
+    
+    // Delete from database
+    const { error: deleteError } = await supabase
+      .from('attachments')
+      .delete()
+      .eq('id', id);
+    
+    if (deleteError) throw deleteError;
+    
+    res.json({ message: 'Attachment deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to delete attachment', message: error.message });
+  }
+});
+
+// ===== 15. DASHBOARD ENDPOINTS =====
+
+/**
+ * @route GET /api/dashboard/stats
+ * @description Get key metrics for dashboard display
+ * @access Private
+ */
+app.get('/api/dashboard/stats', authenticateToken, apiLimiter, async (req, res) => {
+  try {
+    const today = formatDate(new Date());
+    
+    const [
+      { count: totalStaff },
+      { count: activeStaff },
+      { count: activeResidents },
+      { count: todayOnCall },
+      { count: pendingAbsences }
+    ] = await Promise.all([
+      supabase.from('medical_staff').select('*', { count: 'exact', head: true }),
+      supabase.from('medical_staff').select('*', { count: 'exact', head: true }).eq('employment_status', 'active'),
+      supabase.from('medical_staff').select('*', { count: 'exact', head: true }).eq('staff_type', 'medical_resident').eq('employment_status', 'active'),
+      supabase.from('oncall_schedule').select('*', { count: 'exact', head: true }).eq('duty_date', today),
+      supabase.from('leave_requests').select('*', { count: 'exact', head: true }).eq('approval_status', 'pending')
+    ]);
+    
+    const stats = {
+      totalStaff: totalStaff || 0,
+      activeStaff: activeStaff || 0,
+      activeResidents: activeResidents || 0,
+      todayOnCall: todayOnCall || 0,
+      pendingAbsences: pendingAbsences || 0,
+      timestamp: new Date().toISOString()
+    };
+    
+    res.json(stats);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch dashboard statistics', message: error.message });
+  }
+});
+
+/**
+ * @route GET /api/dashboard/upcoming-events
+ * @description Get upcoming events for dashboard
+ * @access Private
+ */
+app.get('/api/dashboard/upcoming-events', authenticateToken, apiLimiter, async (req, res) => {
+  try {
+    const today = formatDate(new Date());
+    const nextWeek = formatDate(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
+    
+    const [rotations, oncall, absences] = await Promise.all([
+      supabase
+        .from('resident_rotations')
+        .select(`
+          *,
+          resident:medical_staff!resident_rotations_resident_id_fkey(full_name),
+          training_unit:training_units!resident_rotations_training_unit_id_fkey(unit_name)
+        `)
+        .gte('start_date', today)
+        .lte('start_date', nextWeek)
+        .eq('rotation_status', 'upcoming')
+        .order('start_date')
+        .limit(5),
+      
+      supabase
+        .from('oncall_schedule')
+        .select(`
+          *,
+          primary_physician:medical_staff!oncall_schedule_primary_physician_id_fkey(full_name)
+        `)
+        .gte('duty_date', today)
+        .lte('duty_date', nextWeek)
+        .order('duty_date')
+        .limit(5),
+      
+      supabase
+        .from('leave_requests')
+        .select(`
+          *,
+          staff_member:medical_staff!leave_requests_staff_member_id_fkey(full_name)
+        `)
+        .gte('leave_start_date', today)
+        .lte('leave_start_date', nextWeek)
+        .eq('approval_status', 'approved')
+        .order('leave_start_date')
+        .limit(5)
     ]);
     
     res.json({
-      departments: departments.data || [],
-      residents: residents.data || [],
-      attendings: attendings.data || [],
-      trainingUnits: trainingUnits.data || [],
-      staff: staff.data || []
+      upcoming_rotations: rotations.data || [],
+      upcoming_oncall: oncall.data || [],
+      upcoming_absences: absences.data || []
     });
-    
   } catch (error) {
-    console.error('Available data error:', error);
-    res.json({
-      departments: [],
-      residents: [],
-      attendings: [],
-      trainingUnits: [],
-      staff: []
-    });
+    res.status(500).json({ error: 'Failed to fetch upcoming events', message: error.message });
   }
 });
 
-// 17. SEARCH ENDPOINT
-app.get('/api/search/medical-staff', authenticateToken, async (req, res) => {
+// ===== 16. SYSTEM SETTINGS ENDPOINTS =====
+
+/**
+ * @route GET /api/settings
+ * @description Get system configuration settings
+ * @access Private
+ */
+app.get('/api/settings', authenticateToken, apiLimiter, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('system_settings')
+      .select('*')
+      .limit(1)
+      .single();
+    
+    if (error) {
+      // Return default settings if none exist
+      return res.json({
+        hospital_name: 'NeumoCare Hospital',
+        default_department_id: null,
+        max_residents_per_unit: 10,
+        default_rotation_duration: 12,
+        enable_audit_logging: true,
+        require_mfa: false,
+        maintenance_mode: false,
+        notifications_enabled: true,
+        absence_notifications: true,
+        announcement_notifications: true,
+        is_default: true
+      });
+    }
+    
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch system settings', message: error.message });
+  }
+});
+
+/**
+ * @route PUT /api/settings
+ * @description Update system configuration settings
+ * @access Private
+ */
+app.put('/api/settings', authenticateToken, checkPermission('system_settings', 'update'), validate(schemas.systemSettings), async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('system_settings')
+      .upsert([req.validatedData])
+      .select()
+      .single();
+    
+    if (error) throw error;
+    
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to update system settings', message: error.message });
+  }
+});
+
+// ===== 17. AVAILABLE DATA ENDPOINTS =====
+
+/**
+ * @route GET /api/available-data
+ * @description Get dropdown data for forms (departments, residents, etc.)
+ * @access Private
+ */
+app.get('/api/available-data', authenticateToken, apiLimiter, async (req, res) => {
+  try {
+    const [departments, residents, attendings, trainingUnits] = await Promise.all([
+      supabase
+        .from('departments')
+        .select('id, name, code')
+        .eq('status', 'active')
+        .order('name'),
+      
+      supabase
+        .from('medical_staff')
+        .select('id, full_name, training_year')
+        .eq('staff_type', 'medical_resident')
+        .eq('employment_status', 'active')
+        .order('full_name'),
+      
+      supabase
+        .from('medical_staff')
+        .select('id, full_name, specialization')
+        .eq('staff_type', 'attending_physician')
+        .eq('employment_status', 'active')
+        .order('full_name'),
+      
+      supabase
+        .from('training_units')
+        .select('id, unit_name, unit_code, maximum_residents')
+        .eq('unit_status', 'active')
+        .order('unit_name')
+    ]);
+    
+    const result = {
+      departments: departments.data || [],
+      residents: residents.data || [],
+      attendings: attendings.data || [],
+      trainingUnits: trainingUnits.data || []
+    };
+    
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch available data', message: error.message });
+  }
+});
+
+/**
+ * @route GET /api/search/medical-staff
+ * @description Search medical staff
+ * @access Private
+ */
+app.get('/api/search/medical-staff', authenticateToken, apiLimiter, async (req, res) => {
   try {
     const { q } = req.query;
-    
-    if (!q || q.length < 2) {
-      return res.json([]);
-    }
+    if (!q || q.length < 2) return res.json([]);
     
     const { data, error } = await supabase
       .from('medical_staff')
@@ -1952,15 +2913,19 @@ app.get('/api/search/medical-staff', authenticateToken, async (req, res) => {
     if (error) throw error;
     
     res.json(data || []);
-    
   } catch (error) {
-    console.error('Search error:', error);
-    res.json([]);
+    res.status(500).json({ error: 'Failed to search medical staff', message: error.message });
   }
 });
 
-// 18. REPORTS ENDPOINTS
-app.get('/api/reports/staff-distribution', authenticateToken, checkPermission('medical_staff', 'read'), async (req, res) => {
+// ===== 18. REPORTS ENDPOINTS =====
+
+/**
+ * @route GET /api/reports/staff-distribution
+ * @description Get staff distribution report
+ * @access Private
+ */
+app.get('/api/reports/staff-distribution', authenticateToken, checkPermission('medical_staff', 'read'), apiLimiter, async (req, res) => {
   try {
     const { data, error } = await supabase
       .from('medical_staff')
@@ -1968,6 +2933,7 @@ app.get('/api/reports/staff-distribution', authenticateToken, checkPermission('m
     
     if (error) throw error;
     
+    // Process distribution
     const distribution = {
       by_staff_type: {},
       by_department: {},
@@ -1987,22 +2953,80 @@ app.get('/api/reports/staff-distribution', authenticateToken, checkPermission('m
     });
     
     res.json({
-      total: data?.length || 0,
+      total: (data || []).length,
       distribution,
       generated_at: new Date().toISOString()
     });
-    
   } catch (error) {
-    console.error('Staff distribution report error:', error);
-    res.status(500).json({ error: 'Failed to generate staff distribution report' });
+    res.status(500).json({ error: 'Failed to generate staff distribution report', message: error.message });
   }
 });
 
-// 19. CALENDAR ENDPOINTS
-app.get('/api/calendar/events', authenticateToken, async (req, res) => {
+/**
+ * @route GET /api/reports/rotation-summary
+ * @description Get rotation summary report
+ * @access Private
+ */
+app.get('/api/reports/rotation-summary', authenticateToken, checkPermission('resident_rotations', 'read'), apiLimiter, async (req, res) => {
+  try {
+    const { year } = req.query;
+    const currentYear = year || new Date().getFullYear();
+    const startDate = `${currentYear}-01-01`;
+    const endDate = `${currentYear}-12-31`;
+    
+    const { data, error } = await supabase
+      .from('resident_rotations')
+      .select(`
+        *,
+        resident:medical_staff!resident_rotations_resident_id_fkey(full_name),
+        training_unit:training_units!resident_rotations_training_unit_id_fkey(unit_name)
+      `)
+      .gte('start_date', startDate)
+      .lte('end_date', endDate);
+    
+    if (error) throw error;
+    
+    const summary = {
+      year: currentYear,
+      total_rotations: (data || []).length,
+      by_status: {},
+      by_month: {},
+      by_training_unit: {},
+      by_rotation_category: {}
+    };
+    
+    (data || []).forEach(rotation => {
+      // By status
+      summary.by_status[rotation.rotation_status] = (summary.by_status[rotation.rotation_status] || 0) + 1;
+      
+      // By month
+      const month = new Date(rotation.start_date).getMonth();
+      summary.by_month[month] = (summary.by_month[month] || 0) + 1;
+      
+      // By training unit
+      const unitName = rotation.training_unit?.unit_name || 'Unknown';
+      summary.by_training_unit[unitName] = (summary.by_training_unit[unitName] || 0) + 1;
+      
+      // By category
+      summary.by_rotation_category[rotation.rotation_category] = (summary.by_rotation_category[rotation.rotation_category] || 0) + 1;
+    });
+    
+    res.json(summary);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to generate rotation summary', message: error.message });
+  }
+});
+
+// ===== 19. CALENDAR ENDPOINTS =====
+
+/**
+ * @route GET /api/calendar/events
+ * @description Get calendar events for a date range
+ * @access Private
+ */
+app.get('/api/calendar/events', authenticateToken, apiLimiter, async (req, res) => {
   try {
     const { start_date, end_date } = req.query;
-    
     if (!start_date || !end_date) {
       return res.status(400).json({ error: 'Start date and end date are required' });
     }
@@ -2089,15 +3113,19 @@ app.get('/api/calendar/events', authenticateToken, async (req, res) => {
     });
     
     res.json(events);
-    
   } catch (error) {
-    console.error('Calendar events error:', error);
-    res.status(500).json({ error: 'Failed to fetch calendar events' });
+    res.status(500).json({ error: 'Failed to fetch calendar events', message: error.message });
   }
 });
 
-// 20. EXPORT ENDPOINTS
-app.get('/api/export/csv', authenticateToken, checkPermission('system_settings', 'read'), async (req, res) => {
+// ===== 20. EXPORT/IMPORT ENDPOINTS =====
+
+/**
+ * @route GET /api/export/csv
+ * @description Export data as CSV
+ * @access Private
+ */
+app.get('/api/export/csv', authenticateToken, checkPermission('system_settings', 'read'), apiLimiter, async (req, res) => {
   try {
     const { type } = req.query;
     
@@ -2133,110 +3161,152 @@ app.get('/api/export/csv', authenticateToken, checkPermission('system_settings',
     res.header('Content-Type', 'text/csv');
     res.header('Content-Disposition', `attachment; filename=${type}-${new Date().toISOString().split('T')[0]}.csv`);
     res.send(csv);
-    
   } catch (error) {
-    console.error('Export error:', error);
-    res.status(500).json({ error: 'Failed to export data' });
-  }
-});
-
-// 21. DEBUG ENDPOINT
-app.get('/api/debug/tables', authenticateToken, async (req, res) => {
-  try {
-    const testPromises = [
-      supabase.from('resident_rotations').select('id').limit(1),
-      supabase.from('oncall_schedule').select('id').limit(1),
-      supabase.from('leave_requests').select('id').limit(1),
-      supabase.from('medical_staff').select('id').limit(1),
-      supabase.from('training_units').select('id').limit(1),
-      supabase.from('departments').select('id').limit(1),
-      supabase.from('app_users').select('id').limit(1),
-      supabase.from('audit_logs').select('id').limit(1),
-      supabase.from('department_announcements').select('id').limit(1)
-    ];
-    
-    const results = await Promise.allSettled(testPromises);
-    
-    const tableStatus = {
-      resident_rotations: results[0].status === 'fulfilled' && !results[0].value.error ? '✅ Accessible' : '❌ Error',
-      oncall_schedule: results[1].status === 'fulfilled' && !results[1].value.error ? '✅ Accessible' : '❌ Error',
-      leave_requests: results[2].status === 'fulfilled' && !results[2].value.error ? '✅ Accessible' : '❌ Error',
-      medical_staff: results[3].status === 'fulfilled' && !results[3].value.error ? '✅ Accessible' : '❌ Error',
-      training_units: results[4].status === 'fulfilled' && !results[4].value.error ? '✅ Accessible' : '❌ Error',
-      departments: results[5].status === 'fulfilled' && !results[5].value.error ? '✅ Accessible' : '❌ Error',
-      app_users: results[6].status === 'fulfilled' && !results[6].value.error ? '✅ Accessible' : '❌ Error',
-      audit_logs: results[7].status === 'fulfilled' && !results[7].value.error ? '✅ Accessible' : '❌ Error',
-      department_announcements: results[8].status === 'fulfilled' && !results[8].value.error ? '✅ Accessible' : '❌ Error'
-    };
-    
-    res.json({ message: 'Table accessibility test', status: tableStatus });
-    
-  } catch (error) {
-    console.error('Debug test error:', error);
-    res.status(500).json({ error: 'Debug test failed' });
+    res.status(500).json({ error: 'Failed to export data', message: error.message });
   }
 });
 
 // ============ ERROR HANDLING ============
+
+/**
+ * 404 Handler
+ */
 app.use('*', (req, res) => {
   res.status(404).json({
     error: 'Endpoint not found',
-    message: `The requested endpoint ${req.originalUrl} does not exist`
+    message: `The requested endpoint ${req.originalUrl} does not exist`,
+    availableEndpoints: [
+      '/health',
+      '/api/auth/login',
+      '/api/auth/register',
+      '/api/auth/forgot-password',
+      '/api/auth/reset-password',
+      '/api/auth/logout',
+      '/api/users',
+      '/api/users/profile',
+      '/api/users/change-password',
+      '/api/medical-staff',
+      '/api/departments',
+      '/api/training-units',
+      '/api/rotations',
+      '/api/rotations/current',
+      '/api/rotations/upcoming',
+      '/api/oncall',
+      '/api/oncall/today',
+      '/api/oncall/upcoming',
+      '/api/absences',
+      '/api/absences/upcoming',
+      '/api/absences/pending',
+      '/api/announcements',
+      '/api/announcements/urgent',
+      '/api/notifications',
+      '/api/notifications/unread',
+      '/api/audit-logs',
+      '/api/attachments/upload',
+      '/api/dashboard/stats',
+      '/api/dashboard/upcoming-events',
+      '/api/settings',
+      '/api/available-data',
+      '/api/search/medical-staff',
+      '/api/reports/staff-distribution',
+      '/api/reports/rotation-summary',
+      '/api/calendar/events',
+      '/api/export/csv',
+      '/api/debug/tables',
+      '/api/debug/cors'
+    ]
   });
 });
 
+/**
+ * Global error handler
+ */
 app.use((err, req, res, next) => {
-  console.error(`[${new Date().toISOString()}] Error:`, err.message);
+  const timestamp = new Date().toISOString();
+  const origin = req.headers.origin || 'no-origin';
   
+  console.error(`[${timestamp}] ${req.method} ${req.url} - Origin: ${origin} - Error:`, err.message);
+  
+  // CORS errors
+  if (err.message?.includes('CORS')) {
+    return res.status(403).json({ 
+      error: 'CORS error', 
+      message: 'Request blocked by CORS policy',
+      details: {
+        your_origin: origin,
+        allowed_origins: allowedOrigins,
+        advice: 'Make sure your origin is in the allowed origins list'
+      }
+    });
+  }
+  
+  // JWT errors
   if (err.message?.includes('JWT') || err.name === 'JsonWebTokenError') {
-    return res.status(401).json({ error: 'Authentication error', message: 'Invalid or expired authentication token' });
+    return res.status(401).json({ 
+      error: 'Authentication error', 
+      message: 'Invalid or expired authentication token' 
+    });
   }
   
+  // Database errors
   if (err.message?.includes('Supabase') || err.code?.startsWith('PGRST')) {
-    return res.status(500).json({ error: 'Database error', message: 'An error occurred while accessing the database' });
+    return res.status(500).json({ 
+      error: 'Database error', 
+      message: 'An error occurred while accessing the database' 
+    });
   }
   
+  // General errors
   res.status(500).json({
     error: 'Internal server error',
-    message: NODE_ENV === 'development' ? err.message : 'An unexpected error occurred'
+    message: NODE_ENV === 'development' ? err.message : 'An unexpected error occurred',
+    timestamp,
+    request_id: Date.now().toString(36)
   });
 });
 
 // ============ SERVER STARTUP ============
-const server = app.listen(PORT, () => {
+
+const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`
     ======================================================
     🏥 NEUMOCARE HOSPITAL MANAGEMENT SYSTEM API v5.0
     ======================================================
-    ✅ COMPLETE PRODUCTION-READY API (100% VUE COMPATIBLE)
+    ✅ COMPLETE PRODUCTION-READY API WITH CORS FIXES
     ✅ Server running on port: ${PORT}
     ✅ Environment: ${NODE_ENV}
+    ✅ Allowed Origins: ${allowedOrigins.join(', ')}
     ✅ Health check: http://localhost:${PORT}/health
+    ✅ Debug CORS: http://localhost:${PORT}/api/debug/cors
     ======================================================
-    📊 COMPLETE ENDPOINT COVERAGE (21 CATEGORIES):
-    • 1. Health check (/health)
-    • 2. Authentication (login, logout, password reset)
-    • 3. Dashboard (stats, upcoming events)
-    • 4. Medical staff (CRUD operations)
-    • 5. Departments (CRUD operations)
-    • 6. Training units (CRUD operations)
-    • 7. Rotations (CRUD + current/upcoming)
-    • 8. On-call schedule (CRUD + today/upcoming)
-    • 9. Absences (CRUD + upcoming/pending)
-    • 10. Announcements (CRUD + urgent)
-    • 11. System settings (CRUD)
-    • 12. Audit logs (read with pagination)
-    • 13. Users (read, profile)
-    • 14. Notifications (read, mark as read)
-    • 15. Attachments (upload)
-    • 16. Available data (dropdowns)
-    • 17. Search (medical staff)
-    • 18. Reports (staff distribution)
-    • 19. Calendar (events)
-    • 20. Export (CSV)
-    • 21. Debug (table accessibility)
+    📊 COMPLETE ENDPOINT COVERAGE:
+    • 2 Authentication endpoints
+    • 8 User management endpoints  
+    • 5 Medical staff endpoints
+    • 4 Department endpoints
+    • 4 Training unit endpoints
+    • 6 Rotation endpoints
+    • 6 On-call endpoints
+    • 6 Absence endpoints
+    • 5 Announcement endpoints
+    • 6 Notification endpoints
+    • 2 Audit log endpoints
+    • 4 Attachment endpoints
+    • 2 Dashboard endpoints
+    • 2 System settings endpoints
+    • 3 Available data endpoints
+    • 2 Report endpoints
+    • 1 Calendar endpoint
+    • 1 Export endpoint
+    • 2 Debug endpoints (CORS & Tables)
     ======================================================
-    TOTAL: 71 ENDPOINTS | ALL VUE FRONTEND COMPATIBLE
+    TOTAL: 73 ENDPOINTS
+    ======================================================
+    🔧 CORS CONFIGURATION:
+    • Origin: https://innovationneumologia.github.io
+    • Credentials: Enabled
+    • Methods: GET, POST, PUT, DELETE, OPTIONS, PATCH
+    • Headers: Content-Type, Authorization, etc.
     ======================================================
   `);
 });
