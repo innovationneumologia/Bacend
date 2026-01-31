@@ -870,6 +870,106 @@ app.post('/api/auth/register', authenticateToken, checkPermission('users', 'crea
  * @description Request password reset link
  * @access Public
  */
+
+/**
+ * @route GET /api/live-status/current
+ * @description Get current active live status for user's department
+ * @access Private
+ */
+app.get('/api/live-status/current', authenticateToken, async (req, res) => {
+  try {
+    // Get user's department ID
+    const { data: user, error: userError } = await supabase
+      .from('app_users')
+      .select('department_id')
+      .eq('id', req.user.id)
+      .single();
+    
+    if (userError) {
+      // If user has no department, allow viewing all (for admin)
+      if (req.user.role === 'system_admin') {
+        var departmentId = null;
+      } else {
+        return res.status(400).json({ 
+          error: 'User configuration error', 
+          message: 'User department not found' 
+        });
+      }
+    } else {
+      var departmentId = user.department_id;
+    }
+    
+    // Build query
+    let query = supabase
+      .from('live_status_updates')
+      .select('*')
+      .gt('expires_at', new Date().toISOString())
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    
+    // Filter by department if not admin
+    if (departmentId && req.user.role !== 'system_admin') {
+      query = query.eq('department_id', departmentId);
+    }
+    
+    const { data, error } = await query;
+    
+    if (error) {
+      console.error('Database query error:', error);
+      throw error;
+    }
+    
+    // Return first record or null
+    const currentStatus = data && data.length > 0 ? data[0] : null;
+    
+    res.json({
+      success: true,
+      data: currentStatus,
+      current_time: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Live status fetch error:', error);
+    res.status(500).json({ 
+      error: 'Internal server error', 
+      message: 'Failed to fetch live status' 
+    });
+  }
+});
+
+/**
+ * @route GET /api/live-status/history
+ * @description Get history of live status updates
+ * @access Private
+ */
+app.get('/api/live-status/history', authenticateToken, async (req, res) => {
+  try {
+    const { limit = 20, offset = 0 } = req.query;
+    
+    const { data, error, count } = await supabase
+      .from('live_status_updates')
+      .select('*', { count: 'exact' })
+      .eq('department_id', req.user.department_id)
+      .order('created_at', { ascending: false })
+      .range(parseInt(offset), parseInt(offset) + parseInt(limit) - 1);
+    
+    if (error) throw error;
+    
+    res.json({
+      success: true,
+      data: data || [],
+      pagination: {
+        total: count || 0,
+        limit: parseInt(limit),
+        offset: parseInt(offset)
+      }
+    });
+    
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch history' });
+  }
+});
 app.post('/api/auth/forgot-password', authLimiter, validate(schemas.forgotPassword), async (req, res) => {
   try {
     const { email } = req.validatedData;
