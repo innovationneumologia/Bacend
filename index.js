@@ -742,7 +742,89 @@ app.post('/api/auth/logout', authenticateToken, apiLimiter, async (req, res) => 
     res.status(500).json({ error: 'Logout failed', message: error.message });
   }
 });
-
+/**
+ * @route POST /api/live-status
+ * @description Save a new live status update
+ * @access Private (requires communications/create permission)
+ */
+app.post('/api/live-status', authenticateToken, checkPermission('communications', 'create'), async (req, res) => {
+  try {
+    const { status_text, author_id, expires_in_hours = 8 } = req.body;
+    
+    // Simple validation
+    if (!status_text || !author_id) {
+      return res.status(400).json({ 
+        error: 'Validation failed', 
+        message: 'Status text and author ID are required' 
+      });
+    }
+    
+    // Verify author is active medical staff
+    const { data: author, error: authorError } = await supabase
+      .from('medical_staff')
+      .select('id, full_name, department_id, professional_email')
+      .eq('id', author_id)
+      .eq('employment_status', 'active')
+      .single();
+    
+    if (authorError || !author) {
+      return res.status(400).json({ 
+        error: 'Invalid author', 
+        message: 'Selected author is not an active medical staff member' 
+      });
+    }
+    
+    // Calculate expiry time (default 8 hours)
+    const expiresAt = new Date(Date.now() + (expires_in_hours * 60 * 60 * 1000));
+    
+    // Insert the status update
+    const { data, error } = await supabase
+      .from('live_status_updates')
+      .insert([{
+        status_text: status_text.trim(),
+        author_id: author.id,
+        author_name: author.full_name,
+        department_id: author.department_id,
+        created_at: new Date().toISOString(),
+        expires_at: expiresAt.toISOString(),
+        is_active: true
+      }])
+      .select('*')
+      .single();
+    
+    if (error) {
+      console.error('Database insert error:', error);
+      throw error;
+    }
+    
+    // Log the action
+    await supabase.from('audit_logs').insert([{
+      action: 'create',
+      resource: 'live_status',
+      resource_id: data.id,
+      user_id: req.user.id,
+      details: {
+        author_id: author.id,
+        department_id: author.department_id,
+        expires_in_hours: expires_in_hours
+      },
+      created_at: new Date().toISOString()
+    }]);
+    
+    res.status(201).json({
+      success: true,
+      message: 'Live status updated successfully',
+      data: data
+    });
+    
+  } catch (error) {
+    console.error('Live status save error:', error);
+    res.status(500).json({ 
+      error: 'Internal server error', 
+      message: 'Failed to save live status update' 
+    });
+  }
+});
 /**
  * @route POST /api/auth/register
  * @description Register new user (admin only)
