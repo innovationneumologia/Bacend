@@ -1,6 +1,6 @@
 // ============ NEUMOCARE HOSPITAL MANAGEMENT SYSTEM API ============
 // VERSION 5.0 - COMPLETE PRODUCTION-READY API WITH CORS FIXES
-// ================================================ =================
+// ================================================ ===============s==
 
 const express = require('express');
 const cors = require('cors');
