@@ -23,7 +23,7 @@ const PORT = process.env.PORT || 3000;
 // ============ CONFIGURATION ============
 const {
   SUPABASE_URL,
-  SUPABASE_SERVICE_KEY,
+  SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY,  // ← Add fallback
   JWT_SECRET = process.env.JWT_SECRET || 'sb_secret_ah53o9afyZzuAfccFM2HNA_rEmi6-iJ',
   NODE_ENV = 'production',
   ALLOWED_ORIGINS = 'https://innovationneumologia.github.io,http://localhost:3000,http://localhost:8080'
