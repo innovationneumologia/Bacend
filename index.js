@@ -2927,6 +2927,36 @@ app.get('/api/attachments/entity/:entityType/:entityId', authenticateToken, apiL
     res.status(500).json({ error: 'Failed to fetch attachments', message: error.message });
   }
 });
+/**
+ * @route DELETE /api/live-status/:id
+ * @description Delete clinical status update
+ * @access Private
+ * @number 12.3
+ */
+app.delete('/api/live-status/:id', authenticateToken, apiLimiter, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const { error } = await supabase
+      .from('clinical_status_updates')
+      .delete()
+      .eq('id', id);
+    
+    if (error) throw error;
+    
+    res.json({
+      success: true,
+      message: 'Clinical status deleted successfully'
+    });
+    
+  } catch (error) {
+    console.error('Delete clinical status error:', error);
+    res.status(500).json({ 
+      error: 'Failed to delete clinical status', 
+      message: error.message 
+    });
+  }
+});
 
 /**
  * @route DELETE /api/attachments/:id
