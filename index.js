@@ -1242,7 +1242,7 @@ app.post('/api/medical-staff', authenticateToken, checkPermission('medical_staff
   try {
     const staffData = { 
       ...req.validatedData, 
-      staff_id: req.validatedData.staff_id || generateId('MD'), 
+      staff_id: req.body.staff_id || generateId('MD'),
       created_at: new Date().toISOString(), 
       updated_at: new Date().toISOString() 
     };
