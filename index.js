@@ -2380,6 +2380,94 @@ app.get('/api/live-status/current', authenticateToken, apiLimiter, async (req, r
     });
   }
 });
+/**
+ * @route POST /api/live-status
+ * @description Create new clinical status update
+ * @access Private
+ * @number 12.2
+ */
+app.post('/api/live-status', authenticateToken, apiLimiter, async (req, res) => {
+  try {
+    const { status_text, author_id, expires_in_hours = 8 } = req.body;
+    
+    console.log('📝 Creating clinical status:', { status_text, author_id, expires_in_hours });
+    
+    // Validation
+    if (!status_text || !status_text.trim()) {
+      return res.status(400).json({ 
+        error: 'Validation failed', 
+        message: 'Status text is required' 
+      });
+    }
+    
+    if (!author_id) {
+      return res.status(400).json({ 
+        error: 'Validation failed', 
+        message: 'Author ID is required' 
+      });
+    }
+    
+    // Check if author exists in medical_staff
+    const { data: author, error: authorError } = await supabase
+      .from('medical_staff')
+      .select('id, full_name, department_id')
+      .eq('id', author_id)
+      .single();
+    
+    if (authorError || !author) {
+      return res.status(400).json({ 
+        error: 'Invalid author', 
+        message: 'Selected author not found in medical staff' 
+      });
+    }
+    
+    // Calculate expiry time
+    const expiresAt = new Date(Date.now() + (expires_in_hours * 60 * 60 * 1000));
+    
+    // Create the status update
+    const statusData = {
+      status_text: status_text.trim(),
+      author_id: author.id,
+      author_name: author.full_name,
+      department_id: author.department_id,
+      created_at: new Date().toISOString(),
+      expires_at: expiresAt.toISOString(),
+      is_active: true
+    };
+    
+    console.log('💾 Inserting clinical status:', statusData);
+    
+    const { data, error } = await supabase
+      .from('clinical_status_updates')
+      .insert([statusData])
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('❌ Database insert error:', error);
+      return res.status(500).json({ 
+        error: 'Database error', 
+        message: error.message,
+        details: error 
+      });
+    }
+    
+    console.log('✅ Clinical status created with ID:', data.id);
+    
+    res.status(201).json({
+      success: true,
+      data: data,
+      message: 'Clinical status updated successfully'
+    });
+    
+  } catch (error) {
+    console.error('💥 Create clinical status error:', error);
+    res.status(500).json({ 
+      error: 'Failed to save clinical status', 
+      message: error.message 
+    });
+  }
+});
 
 /**
  * @route GET /api/live-status/history
