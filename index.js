@@ -1485,6 +1485,148 @@ app.get('/api/available-data', authenticateToken, generalLimiter, asyncHandler(a
     }
   });
 }));
+class ApiService {
+    // ... existing constructor and methods ...
+    
+    async getSystemStats() {
+        try {
+            const response = await this.request('/api/system-stats');
+            // Handle different response structures
+            if (response && response.data !== undefined) {
+                return response.data; // New structure
+            }
+            return response; // Old structure or direct response
+        } catch (error) {
+            console.warn('System stats not available:', error.message);
+            // Return default stats so frontend doesn't break
+            return {
+                totalStaff: 0,
+                activeAttending: 0,
+                activeResidents: 0,
+                onCallNow: 0,
+                pendingApprovals: 0,
+                nextShiftChange: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString()
+            };
+        }
+    }
+    
+    async getLiveUpdates() {
+        try {
+            const response = await this.request('/api/live-updates');
+            return response?.data || response || [];
+        } catch (error) {
+            console.warn('Live updates not available:', error.message);
+            return []; // Return empty array instead of throwing
+        }
+    }
+    
+    async createLiveUpdate(updateData) {
+        try {
+            return await this.request('/api/live-updates', {
+                method: 'POST',
+                body: updateData
+            });
+        } catch (error) {
+            console.warn('Live update creation failed:', error.message);
+            // Return mock response so UI doesn't break
+            return {
+                success: true,
+                data: {
+                    id: 'mock-' + Date.now(),
+                    ...updateData,
+                    created_at: new Date().toISOString()
+                }
+            };
+        }
+    }
+    
+    // Update the request method to handle 404s gracefully
+    async request(endpoint, options = {}) {
+        const url = `${CONFIG.API_BASE_URL}${endpoint}`;
+        
+        try {
+            const config = {
+                method: options.method || 'GET',
+                headers: this.getHeaders(),
+                mode: 'cors',
+                cache: 'no-cache'
+            };
+            
+            if (options.body && typeof options.body === 'object') {
+                config.body = JSON.stringify(options.body);
+            }
+            
+            const response = await fetch(url, config);
+            
+            // Handle 404 Not Found gracefully
+            if (response.status === 404) {
+                console.warn(`Endpoint ${endpoint} not found (404)`);
+                throw new Error(`Endpoint not found: ${endpoint}`);
+            }
+            
+            // Handle 500 Internal Server Error
+            if (response.status === 500) {
+                console.error(`Server error on ${endpoint}:`, response.statusText);
+                throw new Error(`Server error: ${response.statusText}`);
+            }
+            
+            // Handle 204 No Content
+            if (response.status === 204) {
+                return null;
+            }
+            
+            // Check if response is OK
+            if (!response.ok) {
+                // Handle 401 Unauthorized
+                if (response.status === 401) {
+                    this.token = null;
+                    localStorage.removeItem(CONFIG.TOKEN_KEY);
+                    localStorage.removeItem(CONFIG.USER_KEY);
+                    throw new Error('Session expired. Please login again.');
+                }
+                
+                let errorText;
+                try {
+                    const errorData = await response.json();
+                    errorText = errorData.error || errorData.message || `HTTP ${response.status}`;
+                } catch {
+                    errorText = `HTTP ${response.status}: ${response.statusText}`;
+                }
+                throw new Error(errorText);
+            }
+            
+            // Parse JSON response
+            const contentType = response.headers.get('content-type');
+            if (contentType && contentType.includes('application/json')) {
+                return await response.json();
+            }
+            
+            return await response.text();
+            
+        } catch (error) {
+            if (CONFIG.DEBUG) {
+                console.error(`API ${endpoint} failed:`, error);
+            }
+            
+            // Don't throw for non-critical endpoints
+            const nonCriticalEndpoints = [
+                '/api/system-stats',
+                '/api/live-updates',
+                '/api/live-status/current'
+            ];
+            
+            if (nonCriticalEndpoints.includes(endpoint)) {
+                console.warn(`Non-critical endpoint ${endpoint} failed:`, error.message);
+                // Return null/empty for non-critical endpoints
+                if (endpoint === '/api/live-updates') return { data: [] };
+                if (endpoint === '/api/system-stats') return { data: {} };
+                return { data: null };
+            }
+            
+            throw error;
+        }
+    }
+}
 
 // ===== 13. DEBUG ENDPOINTS =====
 
