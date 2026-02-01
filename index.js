@@ -2247,20 +2247,10 @@ app.post('/api/announcements', authenticateToken, checkPermission('communication
       message: error.message 
     });
   }
-});
-    const { data, error } = await supabase
-      .from('department_announcements')
-      .insert([announcementData])
-      .select()
-      .single();
+});  // <-- END HERE, nothing after this
+
     
-    if (error) throw error;
-    
-    res.status(201).json(data);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to create announcement', message: error.message });
-  }
-});
+
 
 /**
  * @route PUT /api/announcements/:id
