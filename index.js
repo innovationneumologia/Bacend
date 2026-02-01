@@ -612,6 +612,67 @@ app.get('/api/debug/tables', authenticateToken, apiLimiter, async (req, res) => 
     res.status(500).json({ error: 'Debug test failed', message: error.message });
   }
 });
+// ===== DEBUG LIVE STATUS ENDPOINT =====
+
+/**
+ * @route GET /api/debug/live-status
+ * @description Debug live status endpoint issues
+ * @access Private
+ */
+app.get('/api/debug/live-status', authenticateToken, async (req, res) => {
+    try {
+        console.log('🔍 Debugging live-status endpoint...');
+        
+        // Test 1: Check current endpoint logic
+        const today = new Date().toISOString();
+        console.log('Today:', today);
+        
+        // Test 2: Run the same query as your live-status endpoint
+        const { data, error } = await supabase
+            .from('clinical_status_updates')
+            .select('*')
+            .gt('expires_at', today)
+            .eq('is_active', true)
+            .order('created_at', { ascending: false })
+            .limit(1)
+            .single();
+        
+        if (error) {
+            console.error('❌ Database query error:', error);
+            return res.json({
+                success: false,
+                endpoint: '/api/live-status/current',
+                error: error.message,
+                code: error.code,
+                details: error.details,
+                hint: error.hint
+            });
+        }
+        
+        console.log('✅ Query successful, data:', data);
+        
+        res.json({
+            success: true,
+            endpoint: '/api/live-status/current',
+            query_conditions: {
+                expires_at: `> ${today}`,
+                is_active: true,
+                order_by: 'created_at DESC',
+                limit: 1
+            },
+            result: data,
+            raw_sql: `SELECT * FROM clinical_status_updates WHERE expires_at > '${today}' AND is_active = true ORDER BY created_at DESC LIMIT 1`
+        });
+        
+    } catch (error) {
+        console.error('💥 Debug endpoint error:', error);
+        res.status(500).json({
+            success: false,
+            error: error.message,
+            stack: process.env.NODE_ENV === 'development' ? error.stack : undefined
+        });
+    }
+});
 
 /**
  * @route GET /api/debug/cors
