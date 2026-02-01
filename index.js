@@ -2327,67 +2327,55 @@ app.get('/api/live-status/current', authenticateToken, apiLimiter, async (req, r
 });
 
 /**
- * @route POST /api/live-status
- * @description Create new clinical status update
+ * @route GET /api/live-status/current
+ * @description Get current active clinical status
  * @access Private
- * @number 12.2
+ * @number 12.1
  */
-app.post('/api/live-status', authenticateToken, apiLimiter, async (req, res) => {
+app.get('/api/live-status/current', authenticateToken, apiLimiter, async (req, res) => {
   try {
-    const { status_text, author_id, expires_in_hours = 8 } = req.body;
-    
-    if (!status_text || !author_id) {
-      return res.status(400).json({ 
-        error: 'Validation failed', 
-        message: 'Status text and author ID are required' 
-      });
-    }
-    
-    const { data: author, error: authorError } = await supabase
-      .from('medical_staff')
-      .select('id, full_name, department_id, professional_email')
-      .eq('id', author_id)
-      .eq('employment_status', 'active')
-      .single();
-    
-    if (authorError || !author) {
-      return res.status(400).json({ 
-        error: 'Invalid author', 
-        message: 'Selected author is not an active medical staff member' 
-      });
-    }
-    
-    const expiresAt = new Date(Date.now() + (expires_in_hours * 60 * 60 * 1000));
+    const today = new Date().toISOString();
+    console.log('🔍 Fetching clinical status, current time:', today);
     
     const { data, error } = await supabase
-      .from('clinical_status_updates')  // ✅ CORRECT TABLE NAME
-      .insert([{
-        status_text: status_text.trim(),
-        author_id: author.id,
-        author_name: author.full_name,
-        department_id: author.department_id,
-        created_at: new Date().toISOString(),
-        expires_at: expiresAt.toISOString(),
-        is_active: true
-      }])
+      .from('clinical_status_updates')
       .select('*')
-      .single();
+      .gt('expires_at', today)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();  // Use maybeSingle() instead of single()
+    
+    console.log('📊 Database query result:', { data, error });
     
     if (error) {
-      console.error('Database insert error:', error);
-      throw error;
+      console.error('❌ Database query error:', error);
+      return res.status(500).json({ 
+        error: 'Database error', 
+        message: error.message 
+      });
     }
     
-    res.status(201).json({
+    if (!data) {
+      console.log('ℹ️ No active clinical status found');
+      return res.json({
+        success: true,
+        data: null,
+        message: 'No clinical status available'
+      });
+    }
+    
+    console.log('✅ Found clinical status:', data);
+    res.json({
       success: true,
       data: data,
-      message: 'Clinical status updated successfully'
+      message: 'Clinical status retrieved successfully'
     });
     
   } catch (error) {
-    console.error('Save clinical status error:', error);
+    console.error('💥 Clinical status error:', error);
     res.status(500).json({ 
-      error: 'Failed to save clinical status', 
+      error: 'Failed to fetch clinical status', 
       message: error.message 
     });
   }
