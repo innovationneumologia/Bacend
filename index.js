@@ -2201,22 +2201,53 @@ app.get('/api/announcements/urgent', authenticateToken, apiLimiter, async (req, 
  */
 app.post('/api/announcements', authenticateToken, checkPermission('communications', 'create'), validate(schemas.announcement), async (req, res) => {
   try {
-const announcementData = { 
-  title: req.validatedData.title,           // Use 'title' not 'announcement_title'
-  content: req.validatedData.content,       // Use 'content' not 'announcement_content'
-  type: 'announcement',                     // Use 'type' not 'announcement_type'
-  priority_level: req.validatedData.priority_level || 'normal',
-  target_audience: req.validatedData.target_audience || 'all_staff',
-  visible_to_roles: ['system_admin', 'department_head', 'medical_resident'],
-  publish_start_date: req.validatedData.publish_start_date || new Date().toISOString().split('T')[0],
-  publish_end_date: req.validatedData.publish_end_date || null,
-  created_by: req.user.id,
-  created_by_name: req.user.full_name || 'System',
-  created_at: new Date().toISOString(), 
-  updated_at: new Date().toISOString(),
-  announcement_id: generateId('ANN')
-};
+    console.log('📝 Creating announcement:', req.body);
+    console.log('👤 User:', req.user);
     
+    const announcementData = { 
+      title: req.validatedData.title,
+      content: req.validatedData.content,
+      type: 'announcement',
+      priority_level: req.validatedData.priority_level || 'normal',
+      target_audience: req.validatedData.target_audience || 'all_staff',
+      visible_to_roles: ['system_admin', 'department_head', 'medical_resident'],
+      publish_start_date: req.validatedData.publish_start_date || new Date().toISOString().split('T')[0],
+      publish_end_date: req.validatedData.publish_end_date || null,
+      created_by: req.user.id,
+      created_by_name: req.user.full_name || 'System',
+      created_at: new Date().toISOString(), 
+      updated_at: new Date().toISOString(),
+      announcement_id: generateId('ANN')
+    };
+    
+    console.log('💾 Inserting:', announcementData);
+    
+    const { data, error } = await supabase
+      .from('department_announcements')
+      .insert([announcementData])
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('❌ Database error:', error);
+      return res.status(500).json({ 
+        error: 'Database error', 
+        message: error.message,
+        details: error 
+      });
+    }
+    
+    console.log('✅ Created:', data.id);
+    res.status(201).json(data);
+    
+  } catch (error) {
+    console.error('💥 Server error:', error);
+    res.status(500).json({ 
+      error: 'Failed to create announcement', 
+      message: error.message 
+    });
+  }
+});
     const { data, error } = await supabase
       .from('department_announcements')
       .insert([announcementData])
