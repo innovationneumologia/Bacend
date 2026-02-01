@@ -213,10 +213,64 @@ const hashPassword = async (password) => await bcrypt.hash(password, 10);
 
 // ============ VALIDATION SCHEMAS ============
 const schemas = {
-  // [Schema definitions remain the same as in your original code]
-  // ... (Include all your existing schema definitions)
+  // For POST /api/medical-staff
+  medicalStaff: Joi.object({
+    full_name: Joi.string().required(),
+    staff_type: Joi.string().valid('medical_resident', 'attending_physician', 'fellow', 'nurse_practitioner', 'administrator').required(),
+    staff_id: Joi.string().optional(),
+    employment_status: Joi.string().valid('active', 'on_leave', 'inactive').default('active'),
+    professional_email: Joi.string().email().required(),
+    department_id: Joi.string().uuid().optional(),
+    academic_degree: Joi.string().optional(),
+    specialization: Joi.string().optional(),
+    resident_year: Joi.string().optional(),
+    clinical_certificate: Joi.string().optional(),
+    certificate_status: Joi.string().optional()
+  }),
+  
+  // For POST /api/announcements
+  announcement: Joi.object({
+    title: Joi.string().required(),
+    content: Joi.string().required(),
+    priority_level: Joi.string().valid('low', 'normal', 'high', 'urgent').default('normal'),
+    target_audience: Joi.string().valid('all_staff', 'attending_only', 'residents_only').default('all_staff'),
+    publish_start_date: Joi.date().optional(),
+    publish_end_date: Joi.date().optional()
+  }),
+  
+  // For POST /api/rotations
+  rotation: Joi.object({
+    resident_id: Joi.string().uuid().required(),
+    training_unit_id: Joi.string().uuid().required(),
+    rotation_start_date: Joi.date().required(),
+    rotation_end_date: Joi.date().required(),
+    rotation_status: Joi.string().valid('scheduled', 'active', 'completed', 'cancelled').default('scheduled'),
+    rotation_category: Joi.string().valid('clinical_rotation', 'research_rotation', 'elective_rotation').default('clinical_rotation'),
+    supervising_attending_id: Joi.string().uuid().optional()
+  }),
+  
+  // For POST /api/oncall
+  onCall: Joi.object({
+    duty_date: Joi.date().required(),
+    shift_type: Joi.string().valid('primary', 'backup', 'secondary').default('primary'),
+    start_time: Joi.string().pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).required(),
+    end_time: Joi.string().pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).required(),
+    primary_physician_id: Joi.string().uuid().required(),
+    backup_physician_id: Joi.string().uuid().optional(),
+    coverage_area: Joi.string().valid('emergency', 'ward', 'icu', 'clinic').default('emergency')
+  }),
+  
+  // For POST /api/absences
+  absence: Joi.object({
+    staff_member_id: Joi.string().uuid().required(),
+    absence_reason: Joi.string().valid('vacation', 'sick_leave', 'conference', 'training', 'personal', 'other').required(),
+    start_date: Joi.date().required(),
+    end_date: Joi.date().required(),
+    status: Joi.string().valid('pending', 'approved', 'rejected').default('pending'),
+    replacement_staff_id: Joi.string().uuid().optional(),
+    notes: Joi.string().optional()
+  })
 };
-
 // ============ VALIDATION MIDDLEWARE ============
 const validate = (schema) => (req, res, next) => {
   const { error, value } = schema.validate(req.body, { abortEarly: false, stripUnknown: true });
