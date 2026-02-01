@@ -926,17 +926,70 @@ app.post('/api/auth/logout', authenticateToken, apiLimiter, async (req, res) => 
  * @description Save a new live status update
  * @access Private (requires communications/create permission)
  */
-app.post('/api/live-status', authenticateToken, checkPermission('communications', 'create'), async (req, res) => {
+/**
+ * @route POST /api/live-status
+ * @description Create new clinical status
+ * @access Private
+ */
+app.post('/api/live-status', authenticateToken, apiLimiter, async (req, res) => {
   try {
     const { status_text, author_id, expires_in_hours = 8 } = req.body;
     
-    // Simple validation
+    // Validate required fields
     if (!status_text || !author_id) {
       return res.status(400).json({ 
         error: 'Validation failed', 
         message: 'Status text and author ID are required' 
       });
     }
+    
+    // Get author details
+    const { data: author, error: authorError } = await supabase
+      .from('medical_staff')
+      .select('id, full_name, department_id')
+      .eq('id', author_id)
+      .single();
+    
+    if (authorError || !author) {
+      return res.status(400).json({ 
+        error: 'Invalid author', 
+        message: 'Author not found in medical staff' 
+      });
+    }
+    
+    // Calculate expiry time
+    const expiresAt = new Date(Date.now() + (expires_in_hours * 60 * 60 * 1000));
+    
+    // Insert new status
+    const { data, error } = await supabase
+      .from('clinical_status_updates')
+      .insert([{
+        status_text: status_text.trim(),
+        author_id: author.id,
+        author_name: author.full_name,
+        department_id: author.department_id,
+        expires_at: expiresAt.toISOString(),
+        is_active: true
+      }])
+      .select()
+      .single();
+    
+    if (error) throw error;
+    
+    res.status(201).json({
+      success: true,
+      data: data,
+      message: 'Clinical status updated successfully'
+    });
+    
+  } catch (error) {
+    console.error('Save clinical status error:', error);
+    res.status(500).json({ 
+      error: 'Failed to save clinical status', 
+      message: error.message 
+    });
+  }
+});
     
     // Verify author is active medical staff
     const { data: author, error: authorError } = await supabase
@@ -1055,28 +1108,51 @@ app.post('/api/auth/register', authenticateToken, checkPermission('users', 'crea
  * @description Get current active live status for user's department
  * @access Private
  */
-app.get('/api/live-status/current', authenticateToken, async (req, res) => {
+/**
+ * @route GET /api/live-status/current
+ * @description Get current clinical status
+ * @access Private
+ */
+app.get('/api/live-status/current', authenticateToken, apiLimiter, async (req, res) => {
   try {
-    // Get user's department ID
-    const { data: user, error: userError } = await supabase
-      .from('app_users')
-      .select('department_id')
-      .eq('id', req.user.id)
+    const today = new Date().toISOString();
+    
+    // Try to get data from clinical_status_updates table
+    const { data, error } = await supabase
+      .from('clinical_status_updates')
+      .select('*')
+      .gt('expires_at', today)
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
       .single();
     
-    if (userError) {
-      // If user has no department, allow viewing all (for admin)
-      if (req.user.role === 'system_admin') {
-        var departmentId = null;
-      } else {
-        return res.status(400).json({ 
-          error: 'User configuration error', 
-          message: 'User department not found' 
+    if (error) {
+      // If no data found or table doesn't exist, return null
+      if (error.code === 'PGRST116' || error.code === '42P01') {
+        return res.json({
+          success: true,
+          data: null,
+          message: 'No clinical status available'
         });
       }
-    } else {
-      var departmentId = user.department_id;
+      throw error;
     }
+    
+    res.json({
+      success: true,
+      data: data,
+      message: 'Clinical status retrieved successfully'
+    });
+    
+  } catch (error) {
+    console.error('Clinical status error:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch clinical status', 
+      message: error.message 
+    });
+  }
+});
     
     // Build query
     let query = supabase
