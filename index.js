@@ -937,7 +937,85 @@ app.get('/api/live-status/current', authenticateToken, async (req, res) => {
     });
   }
 });
+// Add these around line 1500-1600, near your other endpoints
 
+// ===== LIVE STATUS ENDPOINTS =====
+
+/**
+ * @route GET /api/live-status/current
+ * @description Get current active live status
+ */
+app.get('/api/live-status/current', authenticateToken, async (req, res) => {
+  try {
+    const { data, error } = await supabase
+      .from('clinical_status_updates')
+      .select('*')
+      .gt('expires_at', new Date().toISOString())
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+    
+    if (error && error.code !== 'PGRST116') throw error;
+    
+    res.json({
+      success: true,
+      data: data || null
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch live status' });
+  }
+});
+
+/**
+ * @route POST /api/live-status
+ * @description Save new live status
+ */
+app.post('/api/live-status', authenticateToken, checkPermission('communications', 'create'), async (req, res) => {
+  try {
+    const { status_text, author_id, expires_in_hours = 8 } = req.body;
+    
+    if (!status_text || !author_id) {
+      return res.status(400).json({ error: 'Missing required fields' });
+    }
+    
+    // Get author info
+    const { data: author } = await supabase
+      .from('medical_staff')
+      .select('id, full_name, department_id')
+      .eq('id', author_id)
+      .eq('employment_status', 'active')
+      .single();
+    
+    if (!author) {
+      return res.status(400).json({ error: 'Invalid author' });
+    }
+    
+    const expiresAt = new Date(Date.now() + (expires_in_hours * 60 * 60 * 1000));
+    
+    const { data, error } = await supabase
+      .from('clinical_status_updates')
+      .insert([{
+        status_text,
+        author_id: author.id,
+        author_name: author.full_name,
+        department_id: author.department_id,
+        expires_at: expiresAt.toISOString(),
+        is_active: true
+      }])
+      .select()
+      .single();
+    
+    if (error) throw error;
+    
+    res.status(201).json({
+      success: true,
+      data: data
+    });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to save live status' });
+  }
+});
 /**
  * @route GET /api/live-status/history
  * @description Get history of live status updates
