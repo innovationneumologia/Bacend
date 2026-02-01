@@ -2201,13 +2201,21 @@ app.get('/api/announcements/urgent', authenticateToken, apiLimiter, async (req, 
  */
 app.post('/api/announcements', authenticateToken, checkPermission('communications', 'create'), validate(schemas.announcement), async (req, res) => {
   try {
-    const announcementData = { 
-      ...req.validatedData, 
-      announcement_id: generateId('ANN'), 
-      created_by: req.user.id, 
-      created_at: new Date().toISOString(), 
-      updated_at: new Date().toISOString() 
-    };
+   const announcementData = { 
+  announcement_title: req.validatedData.title,
+  announcement_content: req.validatedData.content,
+  announcement_type: 'general_notice', // or get from req.body.type
+  priority_level: req.validatedData.priority_level || 'normal',
+  target_audience: req.validatedData.target_audience || 'all_staff',
+  visible_to_roles: ['viewing_doctor'],
+  publish_start_date: req.validatedData.publish_start_date || new Date().toISOString().split('T')[0],
+  publish_end_date: req.validatedData.publish_end_date || null,
+  created_by: req.user.id,
+  created_by_name: req.user.full_name || 'System',
+  created_at: new Date().toISOString(), 
+  updated_at: new Date().toISOString(),
+  announcement_id: generateId('ANN')
+};
     
     const { data, error } = await supabase
       .from('department_announcements')
