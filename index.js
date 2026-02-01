@@ -787,6 +787,124 @@ app.post('/api/auth/login', authLimiter, validate(schemas.login), async (req, re
     });
   }
 });
+/**
+ * @route GET /api/system-stats
+ * @description Get comprehensive dashboard statistics
+ * @access Private
+ */
+app.get('/api/system-stats', authenticateToken, apiLimiter, async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    
+    // Get all counts in parallel for better performance
+    const [
+      totalStaffPromise,
+      activeAttendingPromise,
+      activeResidentsPromise,
+      todayOnCallPromise,
+      pendingApprovalsPromise,
+      activeRotationsPromise
+    ] = await Promise.all([
+      supabase.from('medical_staff').select('*', { count: 'exact', head: true }),
+      supabase.from('medical_staff').select('*', { count: 'exact', head: true })
+        .eq('staff_type', 'attending_physician').eq('employment_status', 'active'),
+      supabase.from('medical_staff').select('*', { count: 'exact', head: true })
+        .eq('staff_type', 'medical_resident').eq('employment_status', 'active'),
+      supabase.from('oncall_schedule').select('*', { count: 'exact', head: true })
+        .eq('duty_date', today),
+      supabase.from('leave_requests').select('*', { count: 'exact', head: true })
+        .eq('approval_status', 'pending'),
+      supabase.from('resident_rotations').select('*', { count: 'exact', head: true })
+        .eq('rotation_status', 'active')
+    ]);
+    
+    // Calculate stats
+    const stats = {
+      totalStaff: totalStaffPromise.count || 0,
+      activeAttending: activeAttendingPromise.count || 0,
+      activeResidents: activeResidentsPromise.count || 0,
+      onCallNow: todayOnCallPromise.count || 0,
+      activeRotations: activeRotationsPromise.count || 0,
+      pendingApprovals: pendingApprovalsPromise.count || 0,
+      departmentStatus: 'normal',
+      activePatients: Math.floor(Math.random() * 50 + 20), // Simulated
+      icuOccupancy: Math.floor(Math.random() * 30 + 10), // Simulated
+      wardOccupancy: Math.floor(Math.random() * 80 + 40), // Simulated
+      nextShiftChange: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
+      timestamp: new Date().toISOString()
+    };
+    
+    res.json({
+      success: true,
+      data: stats,
+      message: 'Dashboard statistics retrieved successfully'
+    });
+    
+  } catch (error) {
+    console.error('System stats error:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch system statistics', 
+      message: error.message 
+    });
+  }
+});
+/**
+ * @route GET /api/available-data
+ * @description Get dropdown/select options for forms
+ * @access Private
+ */
+app.get('/api/available-data', authenticateToken, apiLimiter, async (req, res) => {
+  try {
+    // Fetch all dropdown data in parallel
+    const [departments, residents, attendings, trainingUnits] = await Promise.all([
+      supabase
+        .from('departments')
+        .select('id, name, code')
+        .eq('status', 'active')
+        .order('name'),
+      
+      supabase
+        .from('medical_staff')
+        .select('id, full_name, training_year, staff_id')
+        .eq('staff_type', 'medical_resident')
+        .eq('employment_status', 'active')
+        .order('full_name'),
+      
+      supabase
+        .from('medical_staff')
+        .select('id, full_name, specialization, staff_id')
+        .eq('staff_type', 'attending_physician')
+        .eq('employment_status', 'active')
+        .order('full_name'),
+      
+      supabase
+        .from('training_units')
+        .select('id, unit_name, unit_code, maximum_residents')
+        .eq('unit_status', 'active')
+        .order('unit_name')
+    ]);
+    
+    const result = {
+      departments: departments.data || [],
+      residents: residents.data || [],
+      attendings: attendings.data || [],
+      trainingUnits: trainingUnits.data || []
+    };
+    
+    res.json({
+      success: true,
+      data: result,
+      message: 'Available data retrieved successfully'
+    });
+    
+  } catch (error) {
+    console.error('Available data error:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch available data', 
+      message: error.message 
+    });
+  }
+});
 
 /**
  * @route POST /api/auth/logout
@@ -2544,21 +2662,86 @@ app.get('/api/announcements', authenticateToken, apiLimiter, async (req, res) =>
  * @description Get live department updates
  * @access Private
  */
+/**
+ * @route GET /api/live-updates
+ * @description Get recent live department updates
+ * @access Private
+ */
 app.get('/api/live-updates', authenticateToken, apiLimiter, async (req, res) => {
-    try {
-        const { data, error } = await supabase
-            .from('live_updates')
-            .select('*')
-            .order('created_at', { ascending: false })
-            .limit(20);
-        
-        if (error) throw error;
-        
-        res.json(data || []);
-    } catch (error) {
-        // Return empty array if table doesn't exist yet
-        res.json([]);
+  try {
+    const { data, error } = await supabase
+      .from('live_updates')
+      .select('*')
+      .order('created_at', { ascending: false })
+      .limit(20);
+    
+    if (error) {
+      // If table doesn't exist, return empty array gracefully
+      if (error.code === '42P01') {
+        return res.json({
+          success: true,
+          data: [],
+          message: 'No live updates available'
+        });
+      }
+      throw error;
     }
+    
+    res.json({
+      success: true,
+      data: data || [],
+      message: data?.length ? 'Live updates retrieved' : 'No live updates found'
+    });
+    
+  } catch (error) {
+    console.error('Live updates error:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch live updates', 
+      message: error.message 
+    });
+  }
+});
+/**
+ * @route GET /api/live-status/history
+ * @description Get historical clinical status updates
+ * @access Private
+ */
+app.get('/api/live-status/history', authenticateToken, apiLimiter, async (req, res) => {
+  try {
+    const { limit = 20, offset = 0 } = req.query;
+    
+    // Validate parameters
+    const parsedLimit = Math.min(parseInt(limit), 100);
+    const parsedOffset = Math.max(0, parseInt(offset));
+    
+    // Query clinical status history
+    const { data, error, count } = await supabase
+      .from('clinical_status_updates')
+      .select('*', { count: 'exact' })
+      .order('created_at', { ascending: false })
+      .range(parsedOffset, parsedOffset + parsedLimit - 1);
+    
+    if (error) throw error;
+    
+    res.json({
+      success: true,
+      data: data || [],
+      pagination: {
+        total: count || 0,
+        limit: parsedLimit,
+        offset: parsedOffset,
+        pages: Math.ceil((count || 0) / parsedLimit)
+      },
+      message: 'Status history retrieved successfully'
+    });
+    
+  } catch (error) {
+    console.error('Status history error:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch status history', 
+      message: error.message 
+    });
+  }
 });
 
 /**
