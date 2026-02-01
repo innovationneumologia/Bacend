@@ -18,6 +18,8 @@ require('dotenv').config();
 
 // ============ INITIALIZATION ============
 const app = express();
+app.set('trust proxy', 1);
+
 const PORT = process.env.PORT || 3000;
 
 // ============ CONFIGURATION ============
@@ -1182,7 +1184,7 @@ app.get('/api/medical-staff/:id', authenticateToken, checkPermission('medical_st
  * @access Private
  * @number 5.3
  */
-app.post('/api/medical-staff', authenticateToken, checkPermission('medical_staff', 'create'), validate(schemas.medicalStaff), async (req, res) => {
+app.post('/api/medical-staff', authenticateToken, checkPermission('medical_staff', 'create'), async (req, res) => {
   try {
     const staffData = { 
       ...req.validatedData, 
