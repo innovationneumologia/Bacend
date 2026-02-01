@@ -946,10 +946,24 @@ app.post('/api/users', authenticateToken, checkPermission('users', 'create'), va
 app.put('/api/users/:id', authenticateToken, checkPermission('users', 'update'), validate(schemas.userProfile), async (req, res) => {
   try {
     const { id } = req.params;
+    const dataSource = req.validatedData || req.body;
+    
+    // Build update data explicitly
     const updateData = { 
-      ...req.validatedData, 
+      full_name: dataSource.full_name || null,
+      phone_number: dataSource.phone_number || null,
+      notifications_enabled: dataSource.notifications_enabled !== undefined ? dataSource.notifications_enabled : true,
+      absence_notifications: dataSource.absence_notifications !== undefined ? dataSource.absence_notifications : true,
+      announcement_notifications: dataSource.announcement_notifications !== undefined ? dataSource.announcement_notifications : true,
       updated_at: new Date().toISOString() 
     };
+    
+    // Remove null/undefined fields
+    Object.keys(updateData).forEach(key => {
+      if (updateData[key] === null || updateData[key] === undefined) {
+        delete updateData[key];
+      }
+    });
     
     const { data, error } = await supabase
       .from('app_users')
@@ -973,7 +987,6 @@ app.put('/api/users/:id', authenticateToken, checkPermission('users', 'update'),
     res.status(500).json({ error: 'Failed to update user', message: error.message });
   }
 });
-
 /**
  * @route DELETE /api/users/:id
  * @description Delete user (soft delete)
