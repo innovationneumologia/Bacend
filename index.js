@@ -2201,13 +2201,13 @@ app.get('/api/announcements/urgent', authenticateToken, apiLimiter, async (req, 
  */
 app.post('/api/announcements', authenticateToken, checkPermission('communications', 'create'), validate(schemas.announcement), async (req, res) => {
   try {
-   const announcementData = { 
-  announcement_title: req.validatedData.title,
-  announcement_content: req.validatedData.content,
-  announcement_type: 'general_notice', // or get from req.body.type
+const announcementData = { 
+  title: req.validatedData.title,           // Use 'title' not 'announcement_title'
+  content: req.validatedData.content,       // Use 'content' not 'announcement_content'
+  type: 'announcement',                     // Use 'type' not 'announcement_type'
   priority_level: req.validatedData.priority_level || 'normal',
   target_audience: req.validatedData.target_audience || 'all_staff',
-  visible_to_roles: ['viewing_doctor'],
+  visible_to_roles: ['system_admin', 'department_head', 'medical_resident'],
   publish_start_date: req.validatedData.publish_start_date || new Date().toISOString().split('T')[0],
   publish_end_date: req.validatedData.publish_end_date || null,
   created_by: req.user.id,
