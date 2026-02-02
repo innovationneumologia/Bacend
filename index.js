@@ -367,10 +367,11 @@ trainingUnit: Joi.object({
   unit_code: Joi.string().required(),
   department_id: Joi.string().uuid().required(),
   supervisor_id: Joi.string().uuid().optional(),
-  // CHANGE THIS LINE:
-  maximum_residents: Joi.number().integer().min(1).default(5),  // ✅ FIXED
+  maximum_residents: Joi.number().integer().min(1).default(5),
   unit_status: Joi.string().valid('active', 'inactive').default('active'),
-  description: Joi.string().optional()
+  // REMOVE THIS LINE or make optional:
+  // description: Joi.string().optional()  // ❌ DELETE OR COMMENT OUT
+  specialty: Joi.string().optional()  // ✅ ADD THIS to match frontend
 }),
   // Notification schema
   notification: Joi.object({
