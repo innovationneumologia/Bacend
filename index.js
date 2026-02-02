@@ -275,15 +275,20 @@ medicalStaff: Joi.object({
   }),
   
   // For POST /api/rotations
-  rotation: Joi.object({
-    resident_id: Joi.string().uuid().required(),
-    training_unit_id: Joi.string().uuid().required(),
-    rotation_start_date: Joi.date().required(),
-    rotation_end_date: Joi.date().required(),
-    rotation_status: Joi.string().valid('scheduled', 'active', 'completed', 'cancelled').default('scheduled'),
-    rotation_category: Joi.string().valid('clinical_rotation', 'research_rotation', 'elective_rotation').default('clinical_rotation'),
-    supervising_attending_id: Joi.string().uuid().optional()
-  }),
+rotation: Joi.object({
+  resident_id: Joi.string().uuid().required(),
+  training_unit_id: Joi.string().uuid().required(),
+  start_date: Joi.date().required(),  // ✅ Correct name
+  end_date: Joi.date().required(),    // ✅ Correct name
+  rotation_status: Joi.string().valid('scheduled', 'active', 'completed', 'cancelled').default('scheduled'),
+  rotation_category: Joi.string().valid('clinical_rotation', 'research_rotation', 'elective_rotation').default('clinical_rotation'),
+  supervising_attending_id: Joi.string().uuid().optional().allow(null),  // ✅ Allow null for NOT NULL column
+  rotation_id: Joi.string().optional(),  // ✅ Add rotation_id field
+  clinical_notes: Joi.string().optional().allow(''),
+  supervisor_evaluation: Joi.string().optional().allow(''),
+  goals: Joi.string().optional().allow(''),
+  notes: Joi.string().optional().allow('')
+}),
   
   // For POST /api/oncall
   onCall: Joi.object({
