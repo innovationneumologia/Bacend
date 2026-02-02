@@ -3812,8 +3812,6 @@ app.use((err, req, res, next) => {
 
 // ============ SERVER STARTUP ============
 
-// ============ SERVER STARTUP ============
-
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`
     ======================================================
@@ -3858,7 +3856,7 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     • All 74 endpoints are fully functional
     ======================================================
   `);
-}); // <-- ADD THIS CLOSING BRACKET
+}); // <-- THIS LINE WAS MISSING THE CLOSING PARENTHESIS AND SEMICOLON
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
