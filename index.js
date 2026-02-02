@@ -209,46 +209,14 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Request Logger
-// Response Wrapper Middleware - Standardize all API responses
 app.use((req, res, next) => {
-  const originalJson = res.json;
-  res.json = function(data) {
-    // Skip wrapping for health/debug endpoints
-    if (req.path === '/' || req.path === '/health' || req.path.includes('/debug')) {
-      return originalJson.call(this, data);
-    }
-    
-    // Already has success property? Leave as is
-    if (data && typeof data === 'object' && 'success' in data) {
-      return originalJson.call(this, data);
-    }
-    
-    // Array responses
-    if (Array.isArray(data)) {
-      return originalJson.call(this, {
-        success: true,
-        data: data,
-        count: data.length,
-        timestamp: new Date().toISOString()
-      });
-    }
-    
-    // Object responses (but not error responses)
-    if (data && typeof data === 'object' && !data.error) {
-      return originalJson.call(this, {
-        success: true,
-        data: data,
-        timestamp: new Date().toISOString()
-      });
-    }
-    
-    // Error responses or other types
-    return originalJson.call(this, {
-      success: false,
-      data: data,
-      timestamp: new Date().toISOString()
-    });
-  };
+  const timestamp = new Date().toISOString();
+  const method = req.method;
+  const url = req.url;
+  const origin = req.headers.origin || 'no-origin';
+  const userAgent = req.headers['user-agent'] || 'no-user-agent';
+  
+  console.log(`📡 [${timestamp}] ${method} ${url} - Origin: ${origin} - UA: ${userAgent.substring(0, 50)}...`);
   next();
 });
 
@@ -290,11 +258,11 @@ medicalStaff: Joi.object({
   department_id: Joi.string().uuid().optional(),
   academic_degree: Joi.string().optional(),
   specialization: Joi.string().optional(),
-  resident_year: Joi.string().optional(),
+  // CHANGE: Make training_year conditional
   training_year: Joi.when('staff_type', {
     is: 'medical_resident',
-    then: Joi.number().optional(),
-    otherwise: Joi.number().optional().allow(null)
+    then: Joi.string().required(),
+    otherwise: Joi.string().optional().allow('').allow(null)
   }),
   clinical_certificate: Joi.string().optional(),
   certificate_status: Joi.string().optional()
@@ -327,15 +295,15 @@ rotation: Joi.object({
 }),
   
   // For POST /api/oncall
-onCall: Joi.object({
+  onCall: Joi.object({
   duty_date: Joi.date().required(),
-  shift_type: Joi.string().valid('primary_call', 'backup_call', 'primary', 'backup').default('primary_call'),
+    shift_type: Joi.string().valid('primary_call', 'backup_call').default('primary_call'),
   start_time: Joi.string().pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).required(),
   end_time: Joi.string().pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).required(),
   primary_physician_id: Joi.string().uuid().required(),
   backup_physician_id: Joi.string().uuid().optional().allow(null),
-  coverage_notes: Joi.string().optional().allow(''),
-  schedule_id: Joi.string().optional(),
+  coverage_notes: Joi.string().optional().allow(''),  // ✅ Correct column name
+  schedule_id: Joi.string().optional(),  // ✅ Add schedule_id
   created_by: Joi.string().uuid().optional().allow(null)
 }),
   
@@ -1437,23 +1405,22 @@ app.post('/api/medical-staff', authenticateToken, checkPermission('medical_staff
       });
     }
     
-const staffData = {
-  full_name: dataSource.full_name,
-  staff_type: dataSource.staff_type,
-  staff_id: dataSource.staff_id || generateId('MD'),
-  employment_status: dataSource.employment_status || 'active',
-  professional_email: dataSource.professional_email,
-  department_id: dataSource.department_id || null,
-  academic_degree: dataSource.academic_degree || null,
-  specialization: dataSource.specialization || null,
-  training_year: dataSource.resident_year ? 
-    parseInt(dataSource.resident_year.replace('PGY-', ''), 10) : 
-    dataSource.training_year || null,
-  clinical_certificate: dataSource.clinical_certificate || null,
-  certificate_status: dataSource.certificate_status || null,
-  created_at: new Date().toISOString(),
-  updated_at: new Date().toISOString()
-};
+    const staffData = {
+      full_name: dataSource.full_name,
+      staff_type: dataSource.staff_type,
+      staff_id: dataSource.staff_id || generateId('MD'),
+      employment_status: dataSource.employment_status || 'active',
+      professional_email: dataSource.professional_email,
+      department_id: dataSource.department_id || null,
+      academic_degree: dataSource.academic_degree || null,
+      specialization: dataSource.specialization || null,
+      // CHANGE THIS: Use training_year (matches your database)
+      training_year: dataSource.training_year || dataSource.resident_year || null,
+      clinical_certificate: dataSource.clinical_certificate || null,
+      certificate_status: dataSource.certificate_status || null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
     
     console.log('💾 Inserting medical staff:', staffData);
     
@@ -2650,12 +2617,6 @@ app.delete('/api/announcements/:id', authenticateToken, checkPermission('communi
  * @access Private
  * @number 12.1
  */
-/**
- * @route GET /api/live-status/current
- * @description Get current active clinical status
- * @access Private
- * @number 12.1
- */
 app.get('/api/live-status/current', authenticateToken, apiLimiter, async (req, res) => {
   try {
     const today = new Date().toISOString();
@@ -2669,24 +2630,26 @@ app.get('/api/live-status/current', authenticateToken, apiLimiter, async (req, r
       .limit(1)
       .single();
     
-    if (error || !data) {
-      return res.json({
-        success: true,
-        data: { clinicalStatus: null },
-        message: 'No clinical status available'
-      });
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return res.json({
+          success: true,
+          data: null,
+          message: 'No clinical status available'
+        });
+      }
+      throw error;
     }
     
     res.json({
       success: true,
-      data: { clinicalStatus: data },
+      data: data,
       message: 'Clinical status retrieved successfully'
     });
     
   } catch (error) {
     console.error('Clinical status error:', error);
     res.status(500).json({ 
-      success: false,
       error: 'Failed to fetch clinical status', 
       message: error.message 
     });
@@ -3327,12 +3290,6 @@ app.get('/api/dashboard/stats', authenticateToken, apiLimiter, async (req, res) 
  * @access Private
  * @number 17.2
  */
-/**
- * @route GET /api/system-stats
- * @description Get comprehensive system statistics
- * @access Private
- * @number 17.2
- */
 app.get('/api/system-stats', authenticateToken, apiLimiter, async (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
@@ -3363,11 +3320,8 @@ app.get('/api/system-stats', authenticateToken, apiLimiter, async (req, res) => 
       activeAttending: activeAttendingPromise.count || 0,
       activeResidents: activeResidentsPromise.count || 0,
       onCallNow: todayOnCallPromise.count || 0,
-      inSurgery: 0,
-      onLeaveStaff: 0,
       activeRotations: activeRotationsPromise.count || 0,
       pendingApprovals: pendingApprovalsPromise.count || 0,
-      statusUpdatesToday: 0,
       departmentStatus: 'normal',
       activePatients: Math.floor(Math.random() * 50 + 20),
       icuOccupancy: Math.floor(Math.random() * 30 + 10),
@@ -3384,25 +3338,9 @@ app.get('/api/system-stats', authenticateToken, apiLimiter, async (req, res) => 
     
   } catch (error) {
     console.error('System stats error:', error);
-    res.json({
-      success: true,
-      data: {
-        totalStaff: 0,
-        activeAttending: 0,
-        activeResidents: 0,
-        onCallNow: 0,
-        inSurgery: 0,
-        onLeaveStaff: 0,
-        activeRotations: 0,
-        pendingApprovals: 0,
-        statusUpdatesToday: 0,
-        departmentStatus: 'normal',
-        activePatients: 0,
-        icuOccupancy: 0,
-        wardOccupancy: 0,
-        nextShiftChange: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString()
-      },
-      message: 'Using fallback statistics'
+    res.status(500).json({ 
+      error: 'Failed to fetch system statistics', 
+      message: error.message 
     });
   }
 });
@@ -3580,15 +3518,9 @@ app.get('/api/available-data', authenticateToken, apiLimiter, async (req, res) =
     
   } catch (error) {
     console.error('Available data error:', error);
-    res.json({
-      success: true,
-      data: {
-        departments: [],
-        residents: [],
-        attendings: [],
-        trainingUnits: []
-      },
-      message: 'Using fallback data'
+    res.status(500).json({ 
+      error: 'Failed to fetch available data', 
+      message: error.message 
     });
   }
 });
