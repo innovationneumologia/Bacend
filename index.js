@@ -223,7 +223,7 @@ medicalStaff: Joi.object({
   department_id: Joi.string().uuid().optional(),
   academic_degree: Joi.string().optional(),
   specialization: Joi.string().optional(),
-  // Change from resident_year to training_year
+  // CHANGE: Use training_year to match your database
   training_year: Joi.string().optional(),
   clinical_certificate: Joi.string().optional(),
   certificate_status: Joi.string().optional()
@@ -1391,22 +1391,22 @@ app.post('/api/medical-staff', authenticateToken, checkPermission('medical_staff
       });
     }
     
-    const staffData = {
-      full_name: dataSource.full_name,
-      staff_type: dataSource.staff_type,
-      staff_id: dataSource.staff_id || generateId('MD'),
-      employment_status: dataSource.employment_status || 'active',
-      professional_email: dataSource.professional_email,
-      department_id: dataSource.department_id || null,
-      academic_degree: dataSource.academic_degree || null,
-      specialization: dataSource.specialization || null,
-      // CHANGE THIS: Use training_year instead of resident_year
-      training_year: dataSource.training_year || dataSource.resident_year || null,
-      clinical_certificate: dataSource.clinical_certificate || null,
-      certificate_status: dataSource.certificate_status || null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString()
-    };
+   const staffData = {
+  full_name: dataSource.full_name,
+  staff_type: dataSource.staff_type,
+  staff_id: dataSource.staff_id || generateId('MD'),
+  employment_status: dataSource.employment_status || 'active',
+  professional_email: dataSource.professional_email,
+  department_id: dataSource.department_id || null,
+  academic_degree: dataSource.academic_degree || null,
+  specialization: dataSource.specialization || null,
+  // CHANGE THIS: Use training_year (matches your database)
+  training_year: dataSource.training_year || dataSource.resident_year || null,
+  clinical_certificate: dataSource.clinical_certificate || null,
+  certificate_status: dataSource.certificate_status || null,
+  created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString()
+};
     
     console.log('💾 Inserting medical staff:', staffData);
     
