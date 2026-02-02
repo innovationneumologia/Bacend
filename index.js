@@ -362,17 +362,16 @@ rotation: Joi.object({
   }),
   
   // Training unit schema
-  trainingUnit: Joi.object({
+trainingUnit: Joi.object({
   unit_name: Joi.string().required(),
   unit_code: Joi.string().required(),
   department_id: Joi.string().uuid().required(),
   supervisor_id: Joi.string().uuid().optional(),
-  // FIX: Change max_residents to maximum_residents
-  maximum_residents: Joi.number().integer().min(1).default(5),
+  // CHANGE THIS LINE:
+  maximum_residents: Joi.number().integer().min(1).default(5),  // ✅ FIXED
   unit_status: Joi.string().valid('active', 'inactive').default('active'),
   description: Joi.string().optional()
 }),
-  
   // Notification schema
   notification: Joi.object({
     title: Joi.string().required(),
