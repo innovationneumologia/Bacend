@@ -365,13 +365,13 @@ rotation: Joi.object({
 trainingUnit: Joi.object({
   unit_name: Joi.string().required(),
   unit_code: Joi.string().required(),
-  department_id: Joi.string().uuid().required(),
-  supervisor_id: Joi.string().uuid().optional(),
+  department_id: Joi.string().uuid().required(),  // ✅ Frontend sends this
+  supervising_attending_id: Joi.string().uuid().optional(),  // ✅ Frontend sends this
   maximum_residents: Joi.number().integer().min(1).default(5),
   unit_status: Joi.string().valid('active', 'inactive').default('active'),
-  // REMOVE THIS LINE or make optional:
-  // description: Joi.string().optional()  // ❌ DELETE OR COMMENT OUT
-  specialty: Joi.string().optional()  // ✅ ADD THIS to match frontend
+  specialty: Joi.string().optional(),
+  location_building: Joi.string().optional(),
+  location_floor: Joi.string().optional()
 }),
   // Notification schema
   notification: Joi.object({
@@ -1777,15 +1777,32 @@ app.post('/api/training-units', authenticateToken, checkPermission('training_uni
   try {
     const dataSource = req.validatedData || req.body;
     
-    // Use correct field names that match database
+    // 1. Get department name from department_id
+    let departmentName = 'Unknown Department';
+    if (dataSource.department_id) {
+      const { data: dept } = await supabase
+        .from('departments')
+        .select('name')
+        .eq('id', dataSource.department_id)
+        .single();
+      
+      if (dept) departmentName = dept.name;
+    }
+    
+    // 2. Translate frontend fields to database columns
     const unitData = { 
       unit_name: dataSource.unit_name,
       unit_code: dataSource.unit_code,
-      department_id: dataSource.department_id,
-      supervising_attending_id: dataSource.supervisor_id || dataSource.supervising_attending_id || null,
+      department_name: departmentName,  // ✅ Required by DB
+      department_id: dataSource.department_id,  // ✅ Optional in DB
       maximum_residents: dataSource.maximum_residents,
-      unit_status: dataSource.unit_status,
-      specialty: dataSource.specialty || dataSource.description || null  // Handle both
+      default_supervisor_id: dataSource.supervising_attending_id || null,
+      supervisor_id: dataSource.supervising_attending_id || null,
+      unit_status: dataSource.unit_status || 'active',
+      specialty: dataSource.specialty || null,
+      unit_description: dataSource.specialty || null,  // Use specialty as description
+      location_building: dataSource.location_building || null,
+      location_floor: dataSource.location_floor || null
     };
     
     const { data, error } = await supabase
