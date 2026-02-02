@@ -293,7 +293,7 @@ rotation: Joi.object({
   // For POST /api/oncall
   onCall: Joi.object({
   duty_date: Joi.date().required(),
-  shift_type: Joi.string().valid('primary', 'backup', 'secondary').default('primary'),
+    shift_type: Joi.string().valid('primary_call', 'backup_call').default('primary_call'),
   start_time: Joi.string().pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).required(),
   end_time: Joi.string().pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).required(),
   primary_physician_id: Joi.string().uuid().required(),
