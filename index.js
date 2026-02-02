@@ -1,5 +1,5 @@
 // ============ NEUMOCARE HOSPITAL MANAGEMENT SYSTEM API ============
-// VERSION 5.1 - COMPLETE PRODUCTION-READY API WITH ALL FIXES
+// VERSION 5.2 - COMPLETE WITH NEW ABSENCE RECORDS SYSTEM
 // ===============================================--=================
 
 const express = require('express');
@@ -18,7 +18,7 @@ require('dotenv').config();
 
 // ============ INITIALIZATION ============
 const app = express();
-app.set('trust proxy', 1); // FIX: For Railway/Heroku proxy support
+app.set('trust proxy', 1);
 
 const PORT = process.env.PORT || 3000;
 
@@ -31,7 +31,6 @@ const {
   ALLOWED_ORIGINS = 'https://innovationneumologia.github.io,http://localhost:3000,http://localhost:8080'
 } = process.env;
 
-// Validate required environment variables
 if (!SUPABASE_URL || !SUPABASE_SERVICE_KEY) {
   console.error('❌ Missing required environment variables');
   process.exit(1);
@@ -78,24 +77,17 @@ console.log('🌐 CORS Configuration:', {
   nodeEnv: NODE_ENV
 });
 
-// Enhanced CORS options
 const corsOptions = {
   origin: function (origin, callback) {
-    // Allow requests with no origin (like mobile apps, curl, postman)
     if (!origin) return callback(null, true);
     
-    // Check if origin is in allowed list
     const isAllowed = allowedOrigins.some(allowedOrigin => {
-      // Exact match
       if (origin === allowedOrigin) return true;
-      // Wildcard match
       if (allowedOrigin === '*') return true;
-      // Subdomain match (e.g., *.github.io)
       if (allowedOrigin.includes('*')) {
         const regex = new RegExp(allowedOrigin.replace('*', '.*'));
         return regex.test(origin);
       }
-      // Localhost variations
       if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
         return allowedOrigins.some(o => o.includes('localhost') || o.includes('127.0.0.1'));
       }
@@ -126,20 +118,14 @@ const corsOptions = {
   maxAge: 86400
 };
 
-// Apply CORS middleware globally with options
 app.use(cors(corsOptions));
-
-// Handle preflight requests
 app.options('*', cors(corsOptions));
 
-// Additional CORS headers middleware
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   
-  // Log all requests for debugging
   console.log(`📡 Request from origin: ${origin || 'no-origin'} to ${req.method} ${req.url}`);
   
-  // Check if origin is allowed
   const isOriginAllowed = allowedOrigins.some(allowedOrigin => {
     if (!origin) return false;
     if (allowedOrigin === '*') return true;
@@ -152,7 +138,6 @@ app.use((req, res, next) => {
     res.header('Access-Control-Allow-Origin', origin);
     console.log(`✅ Setting Access-Control-Allow-Origin to: ${origin}`);
   } else if (!origin) {
-    // For requests without origin (like server-to-server)
     res.header('Access-Control-Allow-Origin', '*');
   }
   
@@ -161,7 +146,6 @@ app.use((req, res, next) => {
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
   res.header('Access-Control-Expose-Headers', 'Content-Range, X-Content-Range');
   
-  // Handle preflight requests
   if (req.method === 'OPTIONS') {
     console.log(`🛫 Handling OPTIONS preflight for: ${req.url}`);
     return res.status(200).end();
@@ -169,9 +153,8 @@ app.use((req, res, next) => {
   
   next();
 });
-// ============ MIDDLEWARE CONFIGURATION ============
 
-// Rate Limiting
+// ============ MIDDLEWARE CONFIGURATION ============
 const apiLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 1000,
@@ -187,7 +170,6 @@ const authLimiter = rateLimit({
   skipSuccessfulRequests: true
 });
 
-// Security middleware
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
   contentSecurityPolicy: {
@@ -201,14 +183,10 @@ app.use(helmet({
   }
 }));
 
-// Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// Static files for uploads
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
-// Request Logger
 app.use((req, res, next) => {
   const timestamp = new Date().toISOString();
   const method = req.method;
@@ -248,27 +226,24 @@ const hashPassword = async (password) => await bcrypt.hash(password, 10);
 
 // ============ VALIDATION SCHEMAS ============
 const schemas = {
-  // For POST /api/medical-staff
-medicalStaff: Joi.object({
-  full_name: Joi.string().required(),
-  staff_type: Joi.string().valid('medical_resident', 'attending_physician', 'fellow', 'nurse_practitioner', 'administrator').required(),
-  staff_id: Joi.string().optional(),
-  employment_status: Joi.string().valid('active', 'on_leave', 'inactive').default('active'),
-  professional_email: Joi.string().email().required(),
-  department_id: Joi.string().uuid().optional(),
-  academic_degree: Joi.string().optional(),
-  specialization: Joi.string().optional(),
-  // CHANGE: Make training_year conditional
-  training_year: Joi.when('staff_type', {
-    is: 'medical_resident',
-    then: Joi.string().required(),
-    otherwise: Joi.string().optional().allow('').allow(null)
+  medicalStaff: Joi.object({
+    full_name: Joi.string().required(),
+    staff_type: Joi.string().valid('medical_resident', 'attending_physician', 'fellow', 'nurse_practitioner', 'administrator').required(),
+    staff_id: Joi.string().optional(),
+    employment_status: Joi.string().valid('active', 'on_leave', 'inactive').default('active'),
+    professional_email: Joi.string().email().required(),
+    department_id: Joi.string().uuid().optional(),
+    academic_degree: Joi.string().optional(),
+    specialization: Joi.string().optional(),
+    training_year: Joi.when('staff_type', {
+      is: 'medical_resident',
+      then: Joi.string().required(),
+      otherwise: Joi.string().optional().allow('').allow(null)
+    }),
+    clinical_certificate: Joi.string().optional(),
+    certificate_status: Joi.string().optional()
   }),
-  clinical_certificate: Joi.string().optional(),
-  certificate_status: Joi.string().optional()
-}),
   
-  // For POST /api/announcements
   announcement: Joi.object({
     title: Joi.string().required(),
     content: Joi.string().required(),
@@ -278,47 +253,48 @@ medicalStaff: Joi.object({
     publish_end_date: Joi.date().optional()
   }),
   
-  // For POST /api/rotations
-rotation: Joi.object({
-  resident_id: Joi.string().uuid().required(),
-  training_unit_id: Joi.string().uuid().required(),
-  start_date: Joi.date().required(),  // ✅ Correct name
-  end_date: Joi.date().required(),    // ✅ Correct name
-  rotation_status: Joi.string().valid('scheduled', 'active', 'completed', 'cancelled').default('scheduled'),
-  rotation_category: Joi.string().valid('clinical_rotation', 'research_rotation', 'elective_rotation').default('clinical_rotation'),
-  supervising_attending_id: Joi.string().uuid().optional().allow(null),  // ✅ Allow null for NOT NULL column
-  rotation_id: Joi.string().optional(),  // ✅ Add rotation_id field
-  clinical_notes: Joi.string().optional().allow(''),
-  supervisor_evaluation: Joi.string().optional().allow(''),
-  goals: Joi.string().optional().allow(''),
-  notes: Joi.string().optional().allow('')
-}),
-  
-  // For POST /api/oncall
-  onCall: Joi.object({
-  duty_date: Joi.date().required(),
-    shift_type: Joi.string().valid('primary_call', 'backup_call').default('primary_call'),
-  start_time: Joi.string().pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).required(),
-  end_time: Joi.string().pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).required(),
-  primary_physician_id: Joi.string().uuid().required(),
-  backup_physician_id: Joi.string().uuid().optional().allow(null),
-  coverage_notes: Joi.string().optional().allow(''),  // ✅ Correct column name
-  schedule_id: Joi.string().optional(),  // ✅ Add schedule_id
-  created_by: Joi.string().uuid().optional().allow(null)
-}),
-  
-  // For POST /api/absences
-  absence: Joi.object({
-    staff_member_id: Joi.string().uuid().required(),
-    absence_reason: Joi.string().valid('vacation', 'sick_leave', 'conference', 'training', 'personal', 'other').required(),
+  rotation: Joi.object({
+    resident_id: Joi.string().uuid().required(),
+    training_unit_id: Joi.string().uuid().required(),
     start_date: Joi.date().required(),
     end_date: Joi.date().required(),
-    status: Joi.string().valid('pending', 'approved', 'rejected').default('pending'),
-    replacement_staff_id: Joi.string().uuid().optional(),
-    notes: Joi.string().optional()
+    rotation_status: Joi.string().valid('scheduled', 'active', 'completed', 'cancelled').default('scheduled'),
+    rotation_category: Joi.string().valid('clinical_rotation', 'research_rotation', 'elective_rotation').default('clinical_rotation'),
+    supervising_attending_id: Joi.string().uuid().optional().allow(null),
+    rotation_id: Joi.string().optional(),
+    clinical_notes: Joi.string().optional().allow(''),
+    supervisor_evaluation: Joi.string().optional().allow(''),
+    goals: Joi.string().optional().allow(''),
+    notes: Joi.string().optional().allow('')
   }),
   
-  // User schemas
+  onCall: Joi.object({
+    duty_date: Joi.date().required(),
+    shift_type: Joi.string().valid('primary_call', 'backup_call').default('primary_call'),
+    start_time: Joi.string().pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).required(),
+    end_time: Joi.string().pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).required(),
+    primary_physician_id: Joi.string().uuid().required(),
+    backup_physician_id: Joi.string().uuid().optional().allow(null),
+    coverage_notes: Joi.string().optional().allow(''),
+    schedule_id: Joi.string().optional(),
+    created_by: Joi.string().uuid().optional().allow(null)
+  }),
+  
+  // NEW: Staff Absence Records Schema (replaces old absence schema)
+  absenceRecord: Joi.object({
+    staff_member_id: Joi.string().uuid().required(),
+    absence_type: Joi.string().valid('planned', 'unplanned').required(),
+    absence_reason: Joi.string().valid('vacation', 'conference', 'sick_leave', 'training', 'personal', 'other').required(),
+    start_date: Joi.date().required(),
+    end_date: Joi.date().required(),
+    coverage_arranged: Joi.boolean().default(false),
+    covering_staff_id: Joi.string().uuid().optional().allow(null),
+    coverage_notes: Joi.string().optional().allow(''),
+    hod_notes: Joi.string().optional().allow('')
+  }),
+  
+  // REMOVED: Old absence schema
+  
   register: Joi.object({
     email: Joi.string().email().required(),
     password: Joi.string().min(8).required(),
@@ -350,7 +326,6 @@ rotation: Joi.object({
     new_password: Joi.string().min(8).required()
   }),
   
-  // Department schema
   department: Joi.object({
     name: Joi.string().required(),
     code: Joi.string().required(),
@@ -361,19 +336,18 @@ rotation: Joi.object({
     status: Joi.string().valid('active', 'inactive').default('active')
   }),
   
-  // Training unit schema
-trainingUnit: Joi.object({
-  unit_name: Joi.string().required(),
-  unit_code: Joi.string().required(),
-  department_id: Joi.string().uuid().required(),  // ✅ Frontend sends this
-  supervising_attending_id: Joi.string().uuid().optional(),  // ✅ Frontend sends this
-  maximum_residents: Joi.number().integer().min(1).default(5),
-  unit_status: Joi.string().valid('active', 'inactive').default('active'),
-  specialty: Joi.string().optional(),
-  location_building: Joi.string().optional(),
-  location_floor: Joi.string().optional()
-}),
-  // Notification schema
+  trainingUnit: Joi.object({
+    unit_name: Joi.string().required(),
+    unit_code: Joi.string().required(),
+    department_id: Joi.string().uuid().required(),
+    supervising_attending_id: Joi.string().uuid().optional(),
+    maximum_residents: Joi.number().integer().min(1).default(5),
+    unit_status: Joi.string().valid('active', 'inactive').default('active'),
+    specialty: Joi.string().optional(),
+    location_building: Joi.string().optional(),
+    location_floor: Joi.string().optional()
+  }),
+  
   notification: Joi.object({
     title: Joi.string().required(),
     message: Joi.string().required(),
@@ -383,7 +357,6 @@ trainingUnit: Joi.object({
     priority: Joi.string().valid('low', 'normal', 'high', 'urgent').default('normal')
   }),
   
-  // System settings schema
   systemSettings: Joi.object({
     hospital_name: Joi.string().required(),
     default_department_id: Joi.string().uuid().optional(),
@@ -522,7 +495,7 @@ const auditLog = async (action, resource, resource_id = '', details = {}) => {
 app.get('/', (req, res) => {
   res.json({
     service: 'NeumoCare Hospital Management System API',
-    version: '5.1.0',
+    version: '5.2.0',
     status: 'operational',
     environment: NODE_ENV,
     cors: {
@@ -544,13 +517,12 @@ app.get('/', (req, res) => {
  * @route GET /health
  * @description Comprehensive health check and API status
  * @access Public
- * @number 1.1
  */
 app.get('/health', apiLimiter, (req, res) => {
   res.json({
     status: 'healthy',
     service: 'NeumoCare Hospital Management System API',
-    version: '5.1.0',
+    version: '5.2.0',
     timestamp: new Date().toISOString(),
     environment: NODE_ENV,
     cors: {
@@ -560,8 +532,8 @@ app.get('/health', apiLimiter, (req, res) => {
     database: SUPABASE_URL ? 'Connected' : 'Not connected',
     uptime: process.uptime(),
     endpoints: {
-      total: 74,
-      categories: 20
+      total: 84,
+      categories: 21
     }
   });
 });
@@ -570,14 +542,13 @@ app.get('/health', apiLimiter, (req, res) => {
  * @route GET /api/debug/tables
  * @description Debug database table accessibility
  * @access Private
- * @number 1.2
  */
 app.get('/api/debug/tables', authenticateToken, apiLimiter, async (req, res) => {
   try {
     const testPromises = [
       supabase.from('resident_rotations').select('id').limit(1),
       supabase.from('oncall_schedule').select('id').limit(1),
-      supabase.from('leave_requests').select('id').limit(1),
+      supabase.from('staff_absence_records').select('id').limit(1), // NEW: staff_absence_records
       supabase.from('medical_staff').select('id').limit(1),
       supabase.from('training_units').select('id').limit(1),
       supabase.from('departments').select('id').limit(1),
@@ -585,14 +556,15 @@ app.get('/api/debug/tables', authenticateToken, apiLimiter, async (req, res) => 
       supabase.from('audit_logs').select('id').limit(1),
       supabase.from('notifications').select('id').limit(1),
       supabase.from('attachments').select('id').limit(1),
-      supabase.from('clinical_status_updates').select('id').limit(1)
+      supabase.from('clinical_status_updates').select('id').limit(1),
+      supabase.from('absence_audit_log').select('id').limit(1) // NEW: absence_audit_log
     ];
     
     const results = await Promise.allSettled(testPromises);
     const tableStatus = {
       resident_rotations: results[0].status === 'fulfilled' && !results[0].value.error ? '✅ Accessible' : '❌ Error',
       oncall_schedule: results[1].status === 'fulfilled' && !results[1].value.error ? '✅ Accessible' : '❌ Error',
-      leave_requests: results[2].status === 'fulfilled' && !results[2].value.error ? '✅ Accessible' : '❌ Error',
+      staff_absence_records: results[2].status === 'fulfilled' && !results[2].value.error ? '✅ Accessible' : '❌ Error',
       medical_staff: results[3].status === 'fulfilled' && !results[3].value.error ? '✅ Accessible' : '❌ Error',
       training_units: results[4].status === 'fulfilled' && !results[4].value.error ? '✅ Accessible' : '❌ Error',
       departments: results[5].status === 'fulfilled' && !results[5].value.error ? '✅ Accessible' : '❌ Error',
@@ -600,7 +572,8 @@ app.get('/api/debug/tables', authenticateToken, apiLimiter, async (req, res) => 
       audit_logs: results[7].status === 'fulfilled' && !results[7].value.error ? '✅ Accessible' : '❌ Error',
       notifications: results[8].status === 'fulfilled' && !results[8].value.error ? '✅ Accessible' : '❌ Error',
       attachments: results[9].status === 'fulfilled' && !results[9].value.error ? '✅ Accessible' : '❌ Error',
-      clinical_status_updates: results[10].status === 'fulfilled' && !results[10].value.error ? '✅ Accessible' : '❌ Error'
+      clinical_status_updates: results[10].status === 'fulfilled' && !results[10].value.error ? '✅ Accessible' : '❌ Error',
+      absence_audit_log: results[11].status === 'fulfilled' && !results[11].value.error ? '✅ Accessible' : '❌ Error'
     };
     
     res.json({ 
@@ -620,7 +593,6 @@ app.get('/api/debug/tables', authenticateToken, apiLimiter, async (req, res) => 
  * @route GET /api/debug/cors
  * @description Debug CORS configuration issues
  * @access Public
- * @number 1.3
  */
 app.get('/api/debug/cors', apiLimiter, (req, res) => {
   const origin = req.headers.origin || 'no-origin-header';
@@ -644,7 +616,6 @@ app.get('/api/debug/cors', apiLimiter, (req, res) => {
  * @route GET /api/debug/live-status
  * @description Debug live status endpoint specifically
  * @access Private
- * @number 1.4
  */
 app.get('/api/debug/live-status', authenticateToken, async (req, res) => {
   try {
@@ -695,7 +666,6 @@ app.get('/api/debug/live-status', authenticateToken, async (req, res) => {
  * @route POST /api/auth/login
  * @description User authentication with JWT generation
  * @access Public
- * @number 2.1
  */
 app.post('/api/auth/login', authLimiter, async (req, res) => {
   try {
@@ -703,7 +673,6 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
     
     console.log('🔐 Login attempt for:', email);
     
-    // 1. Try hardcoded admin first
     if (email === 'admin@neumocare.org' && password === 'password123') {
       const token = jwt.sign(
         { 
@@ -726,7 +695,6 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
       });
     }
     
-    // 2. Check for required fields
     if (!email || !password) {
       return res.status(400).json({ 
         error: 'Validation failed', 
@@ -734,7 +702,6 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
       });
     }
     
-    // 3. Try database lookup
     try {
       const { data: user, error } = await supabase
         .from('app_users')
@@ -745,7 +712,6 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
       if (error || !user) {
         console.log('❌ User not found or database error:', error);
         
-        // For testing, create a mock user if database is not accessible
         const mockToken = jwt.sign(
           { 
             id: 'test-' + Date.now(), 
@@ -774,7 +740,6 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
         });
       }
       
-      // Check password
       const validPassword = await bcrypt.compare(password, user.password_hash || '');
       if (!validPassword) {
         return res.status(401).json({ 
@@ -800,7 +765,6 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
     } catch (dbError) {
       console.error('Database error:', dbError);
       
-      // Fallback: create a temporary user for testing
       const tempToken = jwt.sign(
         { 
           id: 'temp-' + Date.now(), 
@@ -834,7 +798,6 @@ app.post('/api/auth/login', authLimiter, async (req, res) => {
  * @route POST /api/auth/logout
  * @description User logout (client-side token removal)
  * @access Private
- * @number 2.2
  */
 app.post('/api/auth/logout', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -851,7 +814,6 @@ app.post('/api/auth/logout', authenticateToken, apiLimiter, async (req, res) => 
  * @route POST /api/auth/register
  * @description Register new user (admin only)
  * @access Private
- * @number 2.3
  */
 app.post('/api/auth/register', authenticateToken, checkPermission('users', 'create'), validate(schemas.register), async (req, res) => {
   try {
@@ -893,7 +855,6 @@ app.post('/api/auth/register', authenticateToken, checkPermission('users', 'crea
  * @route POST /api/auth/forgot-password
  * @description Request password reset
  * @access Public
- * @number 2.4
  */
 app.post('/api/auth/forgot-password', authLimiter, validate(schemas.forgotPassword), async (req, res) => {
   try {
@@ -915,7 +876,6 @@ app.post('/api/auth/forgot-password', authLimiter, validate(schemas.forgotPasswo
       { expiresIn: '1h' }
     );
     
-    // Store token (in production, send email)
     await supabase.from('password_resets').upsert({
       email: user.email,
       token: resetToken,
@@ -936,7 +896,6 @@ app.post('/api/auth/forgot-password', authLimiter, validate(schemas.forgotPasswo
  * @route POST /api/auth/reset-password
  * @description Reset password with token
  * @access Public
- * @number 2.5
  */
 app.post('/api/auth/reset-password', authLimiter, validate(schemas.resetPassword), async (req, res) => {
   try {
@@ -969,7 +928,6 @@ app.post('/api/auth/reset-password', authLimiter, validate(schemas.resetPassword
  * @route GET /api/users
  * @description List all users with pagination
  * @access Private
- * @number 3.1
  */
 app.get('/api/users', authenticateToken, checkPermission('users', 'read'), apiLimiter, async (req, res) => {
   try {
@@ -1008,7 +966,6 @@ app.get('/api/users', authenticateToken, checkPermission('users', 'read'), apiLi
  * @route GET /api/users/:id
  * @description Get user details
  * @access Private
- * @number 3.2
  */
 app.get('/api/users/:id', authenticateToken, checkPermission('users', 'read'), apiLimiter, async (req, res) => {
   try {
@@ -1036,7 +993,6 @@ app.get('/api/users/:id', authenticateToken, checkPermission('users', 'read'), a
  * @route POST /api/users
  * @description Create new user
  * @access Private
- * @number 3.3
  */
 app.post('/api/users', authenticateToken, checkPermission('users', 'create'), validate(schemas.register), async (req, res) => {
   try {
@@ -1078,7 +1034,6 @@ app.post('/api/users', authenticateToken, checkPermission('users', 'create'), va
  * @route PUT /api/users/:id
  * @description Update user
  * @access Private
- * @number 3.4
  */
 app.put('/api/users/:id', authenticateToken, checkPermission('users', 'update'), validate(schemas.userProfile), async (req, res) => {
   try {
@@ -1116,7 +1071,6 @@ app.put('/api/users/:id', authenticateToken, checkPermission('users', 'update'),
  * @route DELETE /api/users/:id
  * @description Delete user (soft delete)
  * @access Private
- * @number 3.5
  */
 app.delete('/api/users/:id', authenticateToken, checkPermission('users', 'delete'), apiLimiter, async (req, res) => {
   try {
@@ -1142,7 +1096,6 @@ app.delete('/api/users/:id', authenticateToken, checkPermission('users', 'delete
  * @route PUT /api/users/:id/activate
  * @description Activate user account
  * @access Private
- * @number 3.6
  */
 app.put('/api/users/:id/activate', authenticateToken, checkPermission('users', 'update'), apiLimiter, async (req, res) => {
   try {
@@ -1168,7 +1121,6 @@ app.put('/api/users/:id/activate', authenticateToken, checkPermission('users', '
  * @route PUT /api/users/:id/deactivate
  * @description Deactivate user account
  * @access Private
- * @number 3.7
  */
 app.put('/api/users/:id/deactivate', authenticateToken, checkPermission('users', 'update'), apiLimiter, async (req, res) => {
   try {
@@ -1194,7 +1146,6 @@ app.put('/api/users/:id/deactivate', authenticateToken, checkPermission('users',
  * @route PUT /api/users/change-password
  * @description Change current user's password
  * @access Private
- * @number 3.8
  */
 app.put('/api/users/change-password', authenticateToken, validate(schemas.changePassword), async (req, res) => {
   try {
@@ -1237,7 +1188,6 @@ app.put('/api/users/change-password', authenticateToken, validate(schemas.change
  * @route GET /api/users/profile
  * @description Get current user's profile
  * @access Private
- * @number 4.1
  */
 app.get('/api/users/profile', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -1259,7 +1209,6 @@ app.get('/api/users/profile', authenticateToken, apiLimiter, async (req, res) =>
  * @route PUT /api/users/profile
  * @description Update current user's profile
  * @access Private
- * @number 4.2
  */
 app.put('/api/users/profile', authenticateToken, validate(schemas.userProfile), async (req, res) => {
   try {
@@ -1290,7 +1239,6 @@ app.put('/api/users/profile', authenticateToken, validate(schemas.userProfile), 
  * @route GET /api/medical-staff
  * @description List all medical staff
  * @access Private
- * @number 5.1
  */
 app.get('/api/medical-staff', authenticateToken, checkPermission('medical_staff', 'read'), apiLimiter, async (req, res) => {
   try {
@@ -1340,7 +1288,6 @@ app.get('/api/medical-staff', authenticateToken, checkPermission('medical_staff'
  * @route GET /api/medical-staff/:id
  * @description Get medical staff details
  * @access Private
- * @number 5.2
  */
 app.get('/api/medical-staff/:id', authenticateToken, checkPermission('medical_staff', 'read'), apiLimiter, async (req, res) => {
   try {
@@ -1372,19 +1319,16 @@ app.get('/api/medical-staff/:id', authenticateToken, checkPermission('medical_st
   }
 });
 
-
-  /**
+/**
  * @route POST /api/medical-staff
- * @description Create new medical staff (FIXED)
+ * @description Create new medical staff
  * @access Private
- * @number 5.3
  */
 app.post('/api/medical-staff', authenticateToken, checkPermission('medical_staff', 'create'), validate(schemas.medicalStaff), async (req, res) => {
   try {
     console.log('🩺 Creating medical staff...');
     const dataSource = req.validatedData || req.body;
     
-    // Validate required fields
     if (!dataSource.full_name) {
       return res.status(400).json({
         error: 'Validation failed',
@@ -1415,7 +1359,6 @@ app.post('/api/medical-staff', authenticateToken, checkPermission('medical_staff
       department_id: dataSource.department_id || null,
       academic_degree: dataSource.academic_degree || null,
       specialization: dataSource.specialization || null,
-      // CHANGE THIS: Use training_year (matches your database)
       training_year: dataSource.training_year || dataSource.resident_year || null,
       clinical_certificate: dataSource.clinical_certificate || null,
       certificate_status: dataSource.certificate_status || null,
@@ -1453,11 +1396,11 @@ app.post('/api/medical-staff', authenticateToken, checkPermission('medical_staff
     });
   }
 });
+
 /**
  * @route PUT /api/medical-staff/:id
  * @description Update medical staff
  * @access Private
- * @number 5.4
  */
 app.put('/api/medical-staff/:id', authenticateToken, checkPermission('medical_staff', 'update'), validate(schemas.medicalStaff), async (req, res) => {
   try {
@@ -1466,12 +1409,10 @@ app.put('/api/medical-staff/:id', authenticateToken, checkPermission('medical_st
     
     console.log('📝 Updating medical staff ID:', id);
     
-    // Convert training_year if present
     let trainingYearValue = null;
     if (dataSource.training_year || dataSource.resident_year) {
       const yearValue = dataSource.training_year || dataSource.resident_year;
       if (typeof yearValue === 'string') {
-        // Extract number from "PGY-1" format
         const match = yearValue.match(/\d+/);
         trainingYearValue = match ? parseInt(match[0], 10) : parseInt(yearValue, 10);
       } else {
@@ -1527,7 +1468,6 @@ app.put('/api/medical-staff/:id', authenticateToken, checkPermission('medical_st
  * @route DELETE /api/medical-staff/:id
  * @description Deactivate medical staff
  * @access Private
- * @number 5.5
  */
 app.delete('/api/medical-staff/:id', authenticateToken, checkPermission('medical_staff', 'delete'), apiLimiter, async (req, res) => {
   try {
@@ -1559,7 +1499,6 @@ app.delete('/api/medical-staff/:id', authenticateToken, checkPermission('medical
  * @route GET /api/departments
  * @description List all departments
  * @access Private
- * @number 6.1
  */
 app.get('/api/departments', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -1588,7 +1527,6 @@ app.get('/api/departments', authenticateToken, apiLimiter, async (req, res) => {
  * @route GET /api/departments/:id
  * @description Get department details
  * @access Private
- * @number 6.2
  */
 app.get('/api/departments/:id', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -1623,9 +1561,8 @@ app.get('/api/departments/:id', authenticateToken, apiLimiter, async (req, res) 
 
 /**
  * @route POST /api/departments
- * @description Create new department (FIXED)
+ * @description Create new department
  * @access Private
- * @number 6.3
  */
 app.post('/api/departments', authenticateToken, checkPermission('departments', 'create'), validate(schemas.department), async (req, res) => {
   try {
@@ -1652,9 +1589,8 @@ app.post('/api/departments', authenticateToken, checkPermission('departments', '
 
 /**
  * @route PUT /api/departments/:id
- * @description Update department (FIXED)
+ * @description Update department
  * @access Private
- * @number 6.4
  */
 app.put('/api/departments/:id', authenticateToken, checkPermission('departments', 'update'), validate(schemas.department), async (req, res) => {
   try {
@@ -1691,7 +1627,6 @@ app.put('/api/departments/:id', authenticateToken, checkPermission('departments'
  * @route GET /api/training-units
  * @description List all training units
  * @access Private
- * @number 7.1
  */
 app.get('/api/training-units', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -1731,7 +1666,6 @@ app.get('/api/training-units', authenticateToken, apiLimiter, async (req, res) =
  * @route GET /api/training-units/:id
  * @description Get training unit details
  * @access Private
- * @number 7.2
  */
 app.get('/api/training-units/:id', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -1769,15 +1703,13 @@ app.get('/api/training-units/:id', authenticateToken, apiLimiter, async (req, re
 
 /**
  * @route POST /api/training-units
- * @description Create new training unit (FIXED)
+ * @description Create new training unit
  * @access Private
- * @number 7.3
  */
 app.post('/api/training-units', authenticateToken, checkPermission('training_units', 'create'), validate(schemas.trainingUnit), async (req, res) => {
   try {
     const dataSource = req.validatedData || req.body;
     
-    // 1. Get department name from department_id
     let departmentName = 'Unknown Department';
     if (dataSource.department_id) {
       const { data: dept } = await supabase
@@ -1789,18 +1721,17 @@ app.post('/api/training-units', authenticateToken, checkPermission('training_uni
       if (dept) departmentName = dept.name;
     }
     
-    // 2. Translate frontend fields to database columns
     const unitData = { 
       unit_name: dataSource.unit_name,
       unit_code: dataSource.unit_code,
-      department_name: departmentName,  // ✅ Required by DB
-      department_id: dataSource.department_id,  // ✅ Optional in DB
+      department_name: departmentName,
+      department_id: dataSource.department_id,
       maximum_residents: dataSource.maximum_residents,
       default_supervisor_id: dataSource.supervising_attending_id || null,
       supervisor_id: dataSource.supervising_attending_id || null,
       unit_status: dataSource.unit_status || 'active',
       specialty: dataSource.specialty || null,
-      unit_description: dataSource.specialty || null,  // Use specialty as description
+      unit_description: dataSource.specialty || null,
       location_building: dataSource.location_building || null,
       location_floor: dataSource.location_floor || null
     };
@@ -1821,9 +1752,8 @@ app.post('/api/training-units', authenticateToken, checkPermission('training_uni
 
 /**
  * @route PUT /api/training-units/:id
- * @description Update training unit (FIXED)
+ * @description Update training unit
  * @access Private
- * @number 7.4
  */
 app.put('/api/training-units/:id', authenticateToken, checkPermission('training_units', 'update'), validate(schemas.trainingUnit), async (req, res) => {
   try {
@@ -1860,7 +1790,6 @@ app.put('/api/training-units/:id', authenticateToken, checkPermission('training_
  * @route GET /api/rotations
  * @description List all rotations
  * @access Private
- * @number 8.1
  */
 app.get('/api/rotations', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -1923,7 +1852,6 @@ app.get('/api/rotations', authenticateToken, apiLimiter, async (req, res) => {
  * @route GET /api/rotations/current
  * @description Get current rotations
  * @access Private
- * @number 8.2
  */
 app.get('/api/rotations/current', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -1952,7 +1880,6 @@ app.get('/api/rotations/current', authenticateToken, apiLimiter, async (req, res
  * @route GET /api/rotations/upcoming
  * @description Get upcoming rotations
  * @access Private
- * @number 8.3
  */
 app.get('/api/rotations/upcoming', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -1978,9 +1905,8 @@ app.get('/api/rotations/upcoming', authenticateToken, apiLimiter, async (req, re
 
 /**
  * @route POST /api/rotations
- * @description Create new rotation (FIXED)
+ * @description Create new rotation
  * @access Private
- * @number 8.4
  */
 app.post('/api/rotations', authenticateToken, checkPermission('resident_rotations', 'create'), validate(schemas.rotation), async (req, res) => {
   try {
@@ -2008,9 +1934,8 @@ app.post('/api/rotations', authenticateToken, checkPermission('resident_rotation
 
 /**
  * @route PUT /api/rotations/:id
- * @description Update rotation (FIXED)
+ * @description Update rotation
  * @access Private
- * @number 8.5
  */
 app.put('/api/rotations/:id', authenticateToken, checkPermission('resident_rotations', 'update'), validate(schemas.rotation), async (req, res) => {
   try {
@@ -2045,7 +1970,6 @@ app.put('/api/rotations/:id', authenticateToken, checkPermission('resident_rotat
  * @route DELETE /api/rotations/:id
  * @description Cancel rotation
  * @access Private
- * @number 8.6
  */
 app.delete('/api/rotations/:id', authenticateToken, checkPermission('resident_rotations', 'delete'), apiLimiter, async (req, res) => {
   try {
@@ -2072,7 +1996,6 @@ app.delete('/api/rotations/:id', authenticateToken, checkPermission('resident_ro
  * @route GET /api/oncall
  * @description List on-call schedules
  * @access Private
- * @number 9.1
  */
 app.get('/api/oncall', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -2119,7 +2042,6 @@ app.get('/api/oncall', authenticateToken, apiLimiter, async (req, res) => {
  * @route GET /api/oncall/today
  * @description Get today's on-call
  * @access Private
- * @number 9.2
  */
 app.get('/api/oncall/today', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -2145,7 +2067,6 @@ app.get('/api/oncall/today', authenticateToken, apiLimiter, async (req, res) => 
  * @route GET /api/oncall/upcoming
  * @description Get upcoming on-call (next 7 days)
  * @access Private
- * @number 9.3
  */
 app.get('/api/oncall/upcoming', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -2172,9 +2093,8 @@ app.get('/api/oncall/upcoming', authenticateToken, apiLimiter, async (req, res) 
 
 /**
  * @route POST /api/oncall
- * @description Create on-call schedule (FIXED)
+ * @description Create on-call schedule
  * @access Private
- * @number 9.4
  */
 app.post('/api/oncall', authenticateToken, checkPermission('oncall_schedule', 'create'), validate(schemas.onCall), async (req, res) => {
   try {
@@ -2203,9 +2123,8 @@ app.post('/api/oncall', authenticateToken, checkPermission('oncall_schedule', 'c
 
 /**
  * @route PUT /api/oncall/:id
- * @description Update on-call schedule (FIXED)
+ * @description Update on-call schedule
  * @access Private
- * @number 9.5
  */
 app.put('/api/oncall/:id', authenticateToken, checkPermission('oncall_schedule', 'update'), validate(schemas.onCall), async (req, res) => {
   try {
@@ -2240,7 +2159,6 @@ app.put('/api/oncall/:id', authenticateToken, checkPermission('oncall_schedule',
  * @route DELETE /api/oncall/:id
  * @description Delete on-call schedule
  * @access Private
- * @number 9.6
  */
 app.delete('/api/oncall/:id', authenticateToken, checkPermission('oncall_schedule', 'delete'), apiLimiter, async (req, res) => {
   try {
@@ -2258,154 +2176,201 @@ app.delete('/api/oncall/:id', authenticateToken, checkPermission('oncall_schedul
   }
 });
 
-// ===== 10. STAFF ABSENCES ENDPOINTS =====
+// ===== 10. STAFF ABSENCE RECORDS ENDPOINTS (NEW - REPLACES OLD /api/absences) =====
 
 /**
- * @route GET /api/absences
- * @description List all absences
+ * @route GET /api/absence-records
+ * @description List all absence records with filtering
  * @access Private
- * @number 10.1
  */
-app.get('/api/absences', authenticateToken, apiLimiter, async (req, res) => {
+app.get('/api/absence-records', authenticateToken, checkPermission('staff_absence', 'read'), apiLimiter, async (req, res) => {
   try {
-    const { staff_member_id, approval_status, start_date, end_date } = req.query;
+    const { 
+      staff_member_id, 
+      absence_type, 
+      current_status, 
+      start_date, 
+      end_date,
+      coverage_arranged,
+      absence_reason,
+      page = 1, 
+      limit = 100 
+    } = req.query;
+    
+    const offset = (page - 1) * limit;
     
     let query = supabase
-      .from('leave_requests')
+      .from('staff_absence_records')
       .select(`
         *,
-        staff_member:medical_staff!leave_requests_staff_member_id_fkey(full_name, professional_email, department_id)
-      `)
-      .order('leave_start_date');
+        staff_member:medical_staff!staff_absence_records_staff_member_id_fkey(
+          id, full_name, professional_email, staff_type, department_id
+        ),
+        covering_staff:medical_staff!staff_absence_records_covering_staff_id_fkey(
+          id, full_name, professional_email
+        ),
+        recorded_by_user:app_users!staff_absence_records_recorded_by_fkey(
+          id, full_name, email
+        )
+      `, { count: 'exact' });
     
     if (staff_member_id) query = query.eq('staff_member_id', staff_member_id);
-    if (approval_status) query = query.eq('approval_status', approval_status);
-    if (start_date) query = query.gte('leave_start_date', start_date);
-    if (end_date) query = query.lte('leave_end_date', end_date);
+    if (absence_type) query = query.eq('absence_type', absence_type);
+    if (current_status) query = query.eq('current_status', current_status);
+    if (coverage_arranged) query = query.eq('coverage_arranged', coverage_arranged === 'true');
+    if (absence_reason) query = query.eq('absence_reason', absence_reason);
+    if (start_date) query = query.gte('start_date', start_date);
+    if (end_date) query = query.lte('end_date', end_date);
     
-    const { data, error } = await query;
+    const { data, error, count } = await query
+      .order('start_date', { ascending: false })
+      .range(offset, offset + limit - 1);
     
     if (error) throw error;
     
     const transformedData = (data || []).map(item => ({
       ...item,
       staff_member: item.staff_member ? {
-        full_name: item.staff_member.full_name || null,
-        professional_email: item.staff_member.professional_email || null,
-        department_id: item.staff_member.department_id || null
+        id: item.staff_member.id,
+        full_name: item.staff_member.full_name,
+        professional_email: item.staff_member.professional_email,
+        staff_type: item.staff_member.staff_type,
+        department_id: item.staff_member.department_id
+      } : null,
+      covering_staff: item.covering_staff ? {
+        id: item.covering_staff.id,
+        full_name: item.covering_staff.full_name,
+        professional_email: item.covering_staff.professional_email
+      } : null,
+      recorded_by: item.recorded_by_user ? {
+        id: item.recorded_by_user.id,
+        full_name: item.recorded_by_user.full_name,
+        email: item.recorded_by_user.email
       } : null
     }));
     
-    res.json(transformedData);
+    res.json({
+      success: true,
+      data: transformedData,
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: count || 0,
+        totalPages: Math.ceil((count || 0) / limit)
+      }
+    });
+    
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch absences', message: error.message });
+    console.error('Failed to fetch absence records:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch absence records', 
+      message: error.message 
+    });
   }
 });
 
 /**
- * @route GET /api/absences/upcoming
- * @description Get upcoming absences
+ * @route GET /api/absence-records/current
+ * @description Get currently absent staff (active today)
  * @access Private
- * @number 10.2
  */
-app.get('/api/absences/upcoming', authenticateToken, apiLimiter, async (req, res) => {
+app.get('/api/absence-records/current', authenticateToken, apiLimiter, async (req, res) => {
   try {
-    const today = formatDate(new Date());
     const { data, error } = await supabase
-      .from('leave_requests')
+      .from('staff_absence_records')
       .select(`
         *,
-        staff_member:medical_staff!leave_requests_staff_member_id_fkey(full_name, professional_email)
+        staff_member:medical_staff!staff_absence_records_staff_member_id_fkey(
+          id, full_name, professional_email, staff_type
+        ),
+        covering_staff:medical_staff!staff_absence_records_covering_staff_id_fkey(
+          id, full_name
+        )
       `)
-      .gte('leave_start_date', today)
-      .eq('approval_status', 'approved')
-      .order('leave_start_date');
+      .eq('current_status', 'currently_absent')
+      .order('start_date', { ascending: true });
     
     if (error) throw error;
     
-    res.json(data || []);
+    res.json({
+      success: true,
+      data: data || [],
+      count: data?.length || 0
+    });
+    
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch upcoming absences', message: error.message });
+    console.error('Failed to fetch current absences:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch current absences', 
+      message: error.message 
+    });
   }
 });
 
 /**
- * @route GET /api/absences/pending
- * @description Get pending absence requests
+ * @route GET /api/absence-records/upcoming
+ * @description Get upcoming absences (next 7 days)
  * @access Private
- * @number 10.3
  */
-app.get('/api/absences/pending', authenticateToken, apiLimiter, async (req, res) => {
+app.get('/api/absence-records/upcoming', authenticateToken, apiLimiter, async (req, res) => {
   try {
+    const today = new Date().toISOString().split('T')[0];
+    const nextWeek = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    
     const { data, error } = await supabase
-      .from('leave_requests')
+      .from('staff_absence_records')
       .select(`
         *,
-        staff_member:medical_staff!leave_requests_staff_member_id_fkey(full_name, professional_email, department_id)
+        staff_member:medical_staff!staff_absence_records_staff_member_id_fkey(
+          id, full_name, professional_email, staff_type
+        )
       `)
-      .eq('approval_status', 'pending')
-      .order('created_at', { ascending: false });
+      .eq('current_status', 'planned_leave')
+      .gte('start_date', today)
+      .lte('start_date', nextWeek)
+      .order('start_date', { ascending: true });
     
     if (error) throw error;
     
-    res.json(data || []);
+    res.json({
+      success: true,
+      data: data || [],
+      count: data?.length || 0
+    });
+    
   } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch pending absences', message: error.message });
+    console.error('Failed to fetch upcoming absences:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch upcoming absences', 
+      message: error.message 
+    });
   }
 });
 
 /**
- * @route POST /api/absences
- * @description Create new absence request (FIXED)
+ * @route GET /api/absence-records/:id
+ * @description Get single absence record
  * @access Private
- * @number 10.4
  */
-app.post('/api/absences', authenticateToken, checkPermission('staff_absence', 'create'), validate(schemas.absence), async (req, res) => {
-  try {
-    const dataSource = req.validatedData || req.body;
-    const absenceData = { 
-      ...dataSource, 
-      request_id: generateId('ABS'), 
-      total_days: calculateDays(dataSource.start_date, dataSource.end_date),
-      created_at: new Date().toISOString(), 
-      updated_at: new Date().toISOString() 
-    };
-    
-    const { data, error } = await supabase
-      .from('leave_requests')
-      .insert([absenceData])
-      .select()
-      .single();
-    
-    if (error) throw error;
-    
-    res.status(201).json(data);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to create absence record', message: error.message });
-  }
-});
-
-/**
- * @route PUT /api/absences/:id
- * @description Update absence request (FIXED)
- * @access Private
- * @number 10.5
- */
-app.put('/api/absences/:id', authenticateToken, checkPermission('staff_absence', 'update'), validate(schemas.absence), async (req, res) => {
+app.get('/api/absence-records/:id', authenticateToken, checkPermission('staff_absence', 'read'), apiLimiter, async (req, res) => {
   try {
     const { id } = req.params;
-    const dataSource = req.validatedData || req.body;
-    const absenceData = { 
-      ...dataSource, 
-      total_days: calculateDays(dataSource.start_date, dataSource.end_date),
-      updated_at: new Date().toISOString() 
-    };
     
     const { data, error } = await supabase
-      .from('leave_requests')
-      .update(absenceData)
+      .from('staff_absence_records')
+      .select(`
+        *,
+        staff_member:medical_staff!staff_absence_records_staff_member_id_fkey(
+          id, full_name, professional_email, staff_type, department_id
+        ),
+        covering_staff:medical_staff!staff_absence_records_covering_staff_id_fkey(
+          id, full_name, professional_email
+        ),
+        recorded_by_user:app_users!staff_absence_records_recorded_by_fkey(
+          id, full_name, email
+        )
+      `)
       .eq('id', id)
-      .select()
       .single();
     
     if (error) {
@@ -2415,32 +2380,175 @@ app.put('/api/absences/:id', authenticateToken, checkPermission('staff_absence',
       throw error;
     }
     
-    res.json(data);
+    const transformed = {
+      ...data,
+      staff_member: data.staff_member ? {
+        id: data.staff_member.id,
+        full_name: data.staff_member.full_name,
+        professional_email: data.staff_member.professional_email,
+        staff_type: data.staff_member.staff_type,
+        department_id: data.staff_member.department_id
+      } : null,
+      covering_staff: data.covering_staff ? {
+        id: data.covering_staff.id,
+        full_name: data.covering_staff.full_name,
+        professional_email: data.covering_staff.professional_email
+      } : null,
+      recorded_by: data.recorded_by_user ? {
+        id: data.recorded_by_user.id,
+        full_name: data.recorded_by_user.full_name,
+        email: data.recorded_by_user.email
+      } : null
+    };
+    
+    res.json({
+      success: true,
+      data: transformed
+    });
+    
   } catch (error) {
-    res.status(500).json({ error: 'Failed to update absence record', message: error.message });
+    console.error('Failed to fetch absence record:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch absence record', 
+      message: error.message 
+    });
   }
 });
 
 /**
- * @route PUT /api/absences/:id/approve
- * @description Approve/reject absence request
+ * @route POST /api/absence-records
+ * @description Create new absence record (HOD records absence)
  * @access Private
- * @number 10.6
  */
-app.put('/api/absences/:id/approve', authenticateToken, checkPermission('staff_absence', 'update'), apiLimiter, async (req, res) => {
+app.post('/api/absence-records', authenticateToken, checkPermission('staff_absence', 'create'), validate(schemas.absenceRecord), async (req, res) => {
+  try {
+    const dataSource = req.validatedData || req.body;
+    
+    console.log('📝 Creating absence record:', dataSource);
+    
+    const startDate = new Date(dataSource.start_date);
+    const endDate = new Date(dataSource.end_date);
+    
+    if (isNaN(startDate.getTime()) || isNaN(endDate.getTime())) {
+      return res.status(400).json({
+        error: 'Invalid date format',
+        message: 'Start date and end date must be valid dates'
+      });
+    }
+    
+    if (endDate < startDate) {
+      return res.status(400).json({
+        error: 'Invalid date range',
+        message: 'End date must be after start date'
+      });
+    }
+    
+    const absenceData = {
+      staff_member_id: dataSource.staff_member_id,
+      absence_type: dataSource.absence_type,
+      absence_reason: dataSource.absence_reason,
+      start_date: dataSource.start_date,
+      end_date: dataSource.end_date,
+      coverage_arranged: dataSource.coverage_arranged || false,
+      covering_staff_id: dataSource.covering_staff_id || null,
+      coverage_notes: dataSource.coverage_notes || '',
+      hod_notes: dataSource.hod_notes || '',
+      recorded_by: req.user.id,
+      recorded_at: new Date().toISOString(),
+      last_updated: new Date().toISOString()
+    };
+    
+    console.log('💾 Inserting absence record:', absenceData);
+    
+    const { data, error } = await supabase
+      .from('staff_absence_records')
+      .insert([absenceData])
+      .select()
+      .single();
+    
+    if (error) {
+      console.error('❌ Database error:', error);
+      
+      if (error.code === '23503') {
+        return res.status(400).json({
+          error: 'Invalid reference',
+          message: 'Staff member not found'
+        });
+      }
+      
+      if (error.code === '23505') {
+        return res.status(409).json({
+          error: 'Duplicate entry',
+          message: 'An absence record already exists for this staff member during this period'
+        });
+      }
+      
+      throw error;
+    }
+    
+    await supabase.from('absence_audit_log').insert({
+      absence_record_id: data.id,
+      changed_field: 'all',
+      change_type: 'created',
+      changed_by: req.user.id,
+      changed_at: new Date().toISOString()
+    });
+    
+    console.log('✅ Absence record created:', data.id);
+    
+    res.status(201).json({
+      success: true,
+      data: data,
+      message: 'Absence record created successfully'
+    });
+    
+  } catch (error) {
+    console.error('💥 Failed to create absence record:', error);
+    res.status(500).json({ 
+      error: 'Failed to create absence record', 
+      message: error.message 
+    });
+  }
+});
+
+/**
+ * @route PUT /api/absence-records/:id
+ * @description Update absence record
+ * @access Private
+ */
+app.put('/api/absence-records/:id', authenticateToken, checkPermission('staff_absence', 'update'), validate(schemas.absenceRecord), async (req, res) => {
   try {
     const { id } = req.params;
-    const { approved, review_notes } = req.body;
+    const dataSource = req.validatedData || req.body;
+    
+    const { data: currentRecord, error: fetchError } = await supabase
+      .from('staff_absence_records')
+      .select('*')
+      .eq('id', id)
+      .single();
+    
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        return res.status(404).json({ error: 'Absence record not found' });
+      }
+      throw fetchError;
+    }
+    
     const updateData = {
-      approval_status: approved ? 'approved' : 'rejected',
-      reviewed_by: req.user.id,
-      reviewed_at: new Date().toISOString(),
-      review_notes: review_notes || '',
-      updated_at: new Date().toISOString()
+      staff_member_id: dataSource.staff_member_id,
+      absence_type: dataSource.absence_type,
+      absence_reason: dataSource.absence_reason,
+      start_date: dataSource.start_date,
+      end_date: dataSource.end_date,
+      coverage_arranged: dataSource.coverage_arranged,
+      covering_staff_id: dataSource.covering_staff_id,
+      coverage_notes: dataSource.coverage_notes || '',
+      hod_notes: dataSource.hod_notes || '',
+      last_updated: new Date().toISOString()
     };
     
     const { data, error } = await supabase
-      .from('leave_requests')
+      .from('staff_absence_records')
       .update(updateData)
       .eq('id', id)
       .select()
@@ -2448,9 +2556,360 @@ app.put('/api/absences/:id/approve', authenticateToken, checkPermission('staff_a
     
     if (error) throw error;
     
-    res.json(data);
+    const changedFields = [];
+    
+    const fieldsToCheck = [
+      'staff_member_id', 'absence_type', 'absence_reason', 
+      'start_date', 'end_date', 'coverage_arranged', 
+      'covering_staff_id', 'coverage_notes', 'hod_notes'
+    ];
+    
+    for (const field of fieldsToCheck) {
+      const oldValue = String(currentRecord[field] || '');
+      const newValue = String(dataSource[field] || '');
+      
+      if (oldValue !== newValue) {
+        changedFields.push({
+          absence_record_id: id,
+          changed_field: field,
+          old_value: oldValue,
+          new_value: newValue,
+          change_type: 'updated',
+          changed_by: req.user.id,
+          changed_at: new Date().toISOString()
+        });
+      }
+    }
+    
+    if (changedFields.length > 0) {
+      await supabase.from('absence_audit_log').insert(changedFields);
+    }
+    
+    res.json({
+      success: true,
+      data: data,
+      message: 'Absence record updated successfully'
+    });
+    
   } catch (error) {
-    res.status(500).json({ error: 'Failed to update absence status', message: error.message });
+    console.error('Failed to update absence record:', error);
+    res.status(500).json({ 
+      error: 'Failed to update absence record', 
+      message: error.message 
+    });
+  }
+});
+
+/**
+ * @route PUT /api/absence-records/:id/return
+ * @description Mark staff as returned early
+ * @access Private
+ */
+app.put('/api/absence-records/:id/return', authenticateToken, checkPermission('staff_absence', 'update'), apiLimiter, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { return_date, notes } = req.body;
+    
+    const { data: currentRecord, error: fetchError } = await supabase
+      .from('staff_absence_records')
+      .select('*')
+      .eq('id', id)
+      .single();
+    
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        return res.status(404).json({ error: 'Absence record not found' });
+      }
+      throw fetchError;
+    }
+    
+    if (currentRecord.current_status === 'returned_to_duty') {
+      return res.status(400).json({
+        error: 'Already returned',
+        message: 'Staff has already been marked as returned'
+      });
+    }
+    
+    const effectiveReturnDate = return_date || new Date().toISOString().split('T')[0];
+    
+    const updateData = {
+      end_date: effectiveReturnDate,
+      current_status: 'returned_to_duty',
+      hod_notes: currentRecord.hod_notes 
+        ? `${currentRecord.hod_notes}\n[RETURNED EARLY: ${new Date().toISOString()}] ${notes || 'Staff returned early'}`
+        : `[RETURNED EARLY: ${new Date().toISOString()}] ${notes || 'Staff returned early'}`,
+      last_updated: new Date().toISOString()
+    };
+    
+    const { data, error } = await supabase
+      .from('staff_absence_records')
+      .update(updateData)
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    
+    await supabase.from('absence_audit_log').insert({
+      absence_record_id: id,
+      changed_field: 'current_status',
+      old_value: currentRecord.current_status,
+      new_value: 'returned_to_duty',
+      change_type: 'status_changed',
+      changed_by: req.user.id,
+      changed_at: new Date().toISOString(),
+      details: `Staff returned early on ${effectiveReturnDate}`
+    });
+    
+    res.json({
+      success: true,
+      data: data,
+      message: 'Staff marked as returned successfully'
+    });
+    
+  } catch (error) {
+    console.error('Failed to mark staff as returned:', error);
+    res.status(500).json({ 
+      error: 'Failed to mark staff as returned', 
+      message: error.message 
+    });
+  }
+});
+
+/**
+ * @route DELETE /api/absence-records/:id
+ * @description Cancel/delete absence record
+ * @access Private
+ */
+app.delete('/api/absence-records/:id', authenticateToken, checkPermission('staff_absence', 'delete'), apiLimiter, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const { data: record, error: fetchError } = await supabase
+      .from('staff_absence_records')
+      .select('*')
+      .eq('id', id)
+      .single();
+    
+    if (fetchError) {
+      if (fetchError.code === 'PGRST116') {
+        return res.status(404).json({ error: 'Absence record not found' });
+      }
+      throw fetchError;
+    }
+    
+    const { data, error } = await supabase
+      .from('staff_absence_records')
+      .update({
+        current_status: 'cancelled',
+        hod_notes: record.hod_notes 
+          ? `${record.hod_notes}\n[CANCELLED: ${new Date().toISOString()}] Cancelled by ${req.user.full_name || 'system'}`
+          : `[CANCELLED: ${new Date().toISOString()}] Cancelled by ${req.user.full_name || 'system'}`,
+        last_updated: new Date().toISOString()
+      })
+      .eq('id', id)
+      .select()
+      .single();
+    
+    if (error) throw error;
+    
+    await supabase.from('absence_audit_log').insert({
+      absence_record_id: id,
+      changed_field: 'current_status',
+      old_value: record.current_status,
+      new_value: 'cancelled',
+      change_type: 'status_changed',
+      changed_by: req.user.id,
+      changed_at: new Date().toISOString(),
+      details: 'Absence cancelled'
+    });
+    
+    res.json({
+      success: true,
+      data: data,
+      message: 'Absence record cancelled successfully'
+    });
+    
+  } catch (error) {
+    console.error('Failed to cancel absence record:', error);
+    res.status(500).json({ 
+      error: 'Failed to cancel absence record', 
+      message: error.message 
+    });
+  }
+});
+
+/**
+ * @route GET /api/absence-records/staff/:staffId
+ * @description Get absence history for specific staff member
+ * @access Private
+ */
+app.get('/api/absence-records/staff/:staffId', authenticateToken, apiLimiter, async (req, res) => {
+  try {
+    const { staffId } = req.params;
+    const { limit = 20, page = 1 } = req.query;
+    const offset = (page - 1) * limit;
+    
+    const { data, error, count } = await supabase
+      .from('staff_absence_records')
+      .select('*', { count: 'exact' })
+      .eq('staff_member_id', staffId)
+      .order('start_date', { ascending: false })
+      .range(offset, offset + limit - 1);
+    
+    if (error) throw error;
+    
+    res.json({
+      success: true,
+      data: data || [],
+      pagination: {
+        page: parseInt(page),
+        limit: parseInt(limit),
+        total: count || 0,
+        totalPages: Math.ceil((count || 0) / limit)
+      }
+    });
+    
+  } catch (error) {
+    console.error('Failed to fetch staff absence history:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch staff absence history', 
+      message: error.message 
+    });
+  }
+});
+
+/**
+ * @route GET /api/absence-records/dashboard/stats
+ * @description Get dashboard statistics for absence module
+ * @access Private
+ */
+app.get('/api/absence-records/dashboard/stats', authenticateToken, apiLimiter, async (req, res) => {
+  try {
+    const today = new Date().toISOString().split('T')[0];
+    
+    const [
+      totalAbsences,
+      currentAbsences,
+      upcomingAbsences,
+      withoutCoverage,
+      byAbsenceType,
+      byAbsenceReason
+    ] = await Promise.all([
+      supabase
+        .from('staff_absence_records')
+        .select('*', { count: 'exact', head: true }),
+      
+      supabase
+        .from('staff_absence_records')
+        .select('*', { count: 'exact', head: true })
+        .eq('current_status', 'currently_absent'),
+      
+      supabase
+        .from('staff_absence_records')
+        .select('*', { count: 'exact', head: true })
+        .eq('current_status', 'planned_leave')
+        .gte('start_date', today)
+        .lte('start_date', new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]),
+      
+      supabase
+        .from('staff_absence_records')
+        .select('*', { count: 'exact', head: true })
+        .eq('coverage_arranged', false)
+        .eq('current_status', 'currently_absent'),
+      
+      supabase
+        .from('staff_absence_records')
+        .select('absence_type', { count: 'exact', head: false }),
+      
+      supabase
+        .from('staff_absence_records')
+        .select('absence_reason', { count: 'exact', head: false })
+    ]);
+    
+    const absenceTypeCounts = {};
+    if (byAbsenceType.data) {
+      byAbsenceType.data.forEach(item => {
+        absenceTypeCounts[item.absence_type] = (absenceTypeCounts[item.absence_type] || 0) + 1;
+      });
+    }
+    
+    const absenceReasonCounts = {};
+    if (byAbsenceReason.data) {
+      byAbsenceReason.data.forEach(item => {
+        absenceReasonCounts[item.absence_reason] = (absenceReasonCounts[item.absence_reason] || 0) + 1;
+      });
+    }
+    
+    const stats = {
+      total: totalAbsences.count || 0,
+      currently_absent: currentAbsences.count || 0,
+      upcoming: upcomingAbsences.count || 0,
+      without_coverage: withoutCoverage.count || 0,
+      by_type: absenceTypeCounts,
+      by_reason: absenceReasonCounts,
+      coverage_rate: totalAbsences.count 
+        ? Math.round(((totalAbsences.count - withoutCoverage.count) / totalAbsences.count) * 100) 
+        : 100,
+      generated_at: new Date().toISOString()
+    };
+    
+    res.json({
+      success: true,
+      data: stats
+    });
+    
+  } catch (error) {
+    console.error('Failed to fetch absence dashboard stats:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch absence dashboard stats', 
+      message: error.message 
+    });
+  }
+});
+
+/**
+ * @route GET /api/absence-records/:id/audit-log
+ * @description Get audit log for specific absence record
+ * @access Private
+ */
+app.get('/api/absence-records/:id/audit-log', authenticateToken, checkPermission('staff_absence', 'read'), apiLimiter, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const { data, error } = await supabase
+      .from('absence_audit_log')
+      .select(`
+        *,
+        changed_by_user:app_users!absence_audit_log_changed_by_fkey(
+          id, full_name, email
+        )
+      `)
+      .eq('absence_record_id', id)
+      .order('changed_at', { ascending: false });
+    
+    if (error) throw error;
+    
+    const transformedData = (data || []).map(item => ({
+      ...item,
+      changed_by: item.changed_by_user ? {
+        id: item.changed_by_user.id,
+        full_name: item.changed_by_user.full_name,
+        email: item.changed_by_user.email
+      } : null
+    }));
+    
+    res.json({
+      success: true,
+      data: transformedData
+    });
+    
+  } catch (error) {
+    console.error('Failed to fetch audit log:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch audit log', 
+      message: error.message 
+    });
   }
 });
 
@@ -2460,7 +2919,6 @@ app.put('/api/absences/:id/approve', authenticateToken, checkPermission('staff_a
  * @route GET /api/announcements
  * @description List all active announcements
  * @access Private
- * @number 11.1
  */
 app.get('/api/announcements', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -2484,7 +2942,6 @@ app.get('/api/announcements', authenticateToken, apiLimiter, async (req, res) =>
  * @route GET /api/announcements/urgent
  * @description Get urgent announcements
  * @access Private
- * @number 11.2
  */
 app.get('/api/announcements/urgent', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -2507,16 +2964,14 @@ app.get('/api/announcements/urgent', authenticateToken, apiLimiter, async (req, 
 
 /**
  * @route POST /api/announcements
- * @description Create new announcement (FIXED)
+ * @description Create new announcement
  * @access Private
- * @number 11.3
  */
 app.post('/api/announcements', authenticateToken, checkPermission('communications', 'create'), validate(schemas.announcement), async (req, res) => {
   try {
     console.log('📝 Creating announcement...');
     const dataSource = req.validatedData || req.body;
     
-    // Validate required fields
     if (!dataSource.title) {
       return res.status(400).json({ 
         error: 'Validation failed', 
@@ -2578,9 +3033,8 @@ app.post('/api/announcements', authenticateToken, checkPermission('communication
 
 /**
  * @route PUT /api/announcements/:id
- * @description Update announcement (FIXED)
+ * @description Update announcement
  * @access Private
- * @number 11.4
  */
 app.put('/api/announcements/:id', authenticateToken, checkPermission('communications', 'update'), validate(schemas.announcement), async (req, res) => {
   try {
@@ -2615,7 +3069,6 @@ app.put('/api/announcements/:id', authenticateToken, checkPermission('communicat
  * @route DELETE /api/announcements/:id
  * @description Delete announcement
  * @access Private
- * @number 11.5
  */
 app.delete('/api/announcements/:id', authenticateToken, checkPermission('communications', 'delete'), apiLimiter, async (req, res) => {
   try {
@@ -2639,7 +3092,6 @@ app.delete('/api/announcements/:id', authenticateToken, checkPermission('communi
  * @route GET /api/live-status/current
  * @description Get current active clinical status
  * @access Private
- * @number 12.1
  */
 app.get('/api/live-status/current', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -2684,7 +3136,6 @@ app.get('/api/live-status/current', authenticateToken, apiLimiter, async (req, r
  * @route POST /api/live-status
  * @description Create new clinical status update
  * @access Private
- * @number 12.2
  */
 app.post('/api/live-status', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -2692,7 +3143,6 @@ app.post('/api/live-status', authenticateToken, apiLimiter, async (req, res) => 
     
     console.log('📝 Creating clinical status:', { status_text, author_id, expires_in_hours });
     
-    // Validation
     if (!status_text || !status_text.trim()) {
       return res.status(400).json({ 
         error: 'Validation failed', 
@@ -2707,7 +3157,6 @@ app.post('/api/live-status', authenticateToken, apiLimiter, async (req, res) => 
       });
     }
     
-    // Check if author exists in medical_staff
     const { data: author, error: authorError } = await supabase
       .from('medical_staff')
       .select('id, full_name, department_id')
@@ -2721,10 +3170,8 @@ app.post('/api/live-status', authenticateToken, apiLimiter, async (req, res) => 
       });
     }
     
-    // Calculate expiry time
     const expiresAt = new Date(Date.now() + (expires_in_hours * 60 * 60 * 1000));
     
-    // Create the status update
     const statusData = {
       status_text: status_text.trim(),
       author_id: author.id,
@@ -2773,7 +3220,6 @@ app.post('/api/live-status', authenticateToken, apiLimiter, async (req, res) => 
  * @route GET /api/live-status/history
  * @description Get history of clinical status updates
  * @access Private
- * @number 12.3
  */
 app.get('/api/live-status/history', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -2816,7 +3262,6 @@ app.get('/api/live-status/history', authenticateToken, apiLimiter, async (req, r
  * @route GET /api/live-updates
  * @description Get recent live department updates
  * @access Private
- * @number 13.1
  */
 app.get('/api/live-updates', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -2856,7 +3301,6 @@ app.get('/api/live-updates', authenticateToken, apiLimiter, async (req, res) => 
  * @route POST /api/live-updates
  * @description Create live update
  * @access Private
- * @number 13.2
  */
 app.post('/api/live-updates', authenticateToken, checkPermission('communications', 'create'), apiLimiter, async (req, res) => {
   try {
@@ -2900,7 +3344,6 @@ app.post('/api/live-updates', authenticateToken, checkPermission('communications
  * @route GET /api/notifications
  * @description Get user notifications
  * @access Private
- * @number 14.1
  */
 app.get('/api/notifications', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -2929,7 +3372,6 @@ app.get('/api/notifications', authenticateToken, apiLimiter, async (req, res) =>
  * @route GET /api/notifications/unread
  * @description Get unread notification count
  * @access Private
- * @number 14.2
  */
 app.get('/api/notifications/unread', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -2951,7 +3393,6 @@ app.get('/api/notifications/unread', authenticateToken, apiLimiter, async (req, 
  * @route PUT /api/notifications/:id/read
  * @description Mark notification as read
  * @access Private
- * @number 14.3
  */
 app.put('/api/notifications/:id/read', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -2977,7 +3418,6 @@ app.put('/api/notifications/:id/read', authenticateToken, apiLimiter, async (req
  * @route PUT /api/notifications/mark-all-read
  * @description Mark all notifications as read
  * @access Private
- * @number 14.4
  */
 app.put('/api/notifications/mark-all-read', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -3002,7 +3442,6 @@ app.put('/api/notifications/mark-all-read', authenticateToken, apiLimiter, async
  * @route DELETE /api/notifications/:id
  * @description Delete notification
  * @access Private
- * @number 14.5
  */
 app.delete('/api/notifications/:id', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -3023,9 +3462,8 @@ app.delete('/api/notifications/:id', authenticateToken, apiLimiter, async (req, 
 
 /**
  * @route POST /api/notifications
- * @description Create notification (admin only) (FIXED)
+ * @description Create notification (admin only)
  * @access Private
- * @number 14.6
  */
 app.post('/api/notifications', authenticateToken, checkPermission('communications', 'create'), validate(schemas.notification), async (req, res) => {
   try {
@@ -3057,7 +3495,6 @@ app.post('/api/notifications', authenticateToken, checkPermission('communication
  * @route GET /api/audit-logs
  * @description Get audit logs (admin only)
  * @access Private
- * @number 15.1
  */
 app.get('/api/audit-logs', authenticateToken, checkPermission('audit_logs', 'read'), apiLimiter, async (req, res) => {
   try {
@@ -3100,7 +3537,6 @@ app.get('/api/audit-logs', authenticateToken, checkPermission('audit_logs', 'rea
  * @route GET /api/audit-logs/user/:userId
  * @description Get audit logs for specific user
  * @access Private
- * @number 15.2
  */
 app.get('/api/audit-logs/user/:userId', authenticateToken, checkPermission('audit_logs', 'read'), apiLimiter, async (req, res) => {
   try {
@@ -3137,7 +3573,6 @@ app.get('/api/audit-logs/user/:userId', authenticateToken, checkPermission('audi
  * @route POST /api/attachments/upload
  * @description Upload file attachment
  * @access Private
- * @number 16.1
  */
 app.post('/api/attachments/upload', authenticateToken, checkPermission('attachments', 'create'), upload.single('file'), async (req, res) => {
   try {
@@ -3181,7 +3616,6 @@ app.post('/api/attachments/upload', authenticateToken, checkPermission('attachme
  * @route GET /api/attachments/:id
  * @description Get attachment details
  * @access Private
- * @number 16.2
  */
 app.get('/api/attachments/:id', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -3209,7 +3643,6 @@ app.get('/api/attachments/:id', authenticateToken, apiLimiter, async (req, res) 
  * @route GET /api/attachments/entity/:entityType/:entityId
  * @description Get attachments for specific entity
  * @access Private
- * @number 16.3
  */
 app.get('/api/attachments/entity/:entityType/:entityId', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -3233,7 +3666,6 @@ app.get('/api/attachments/entity/:entityType/:entityId', authenticateToken, apiL
  * @route DELETE /api/attachments/:id
  * @description Delete attachment
  * @access Private
- * @number 16.4
  */
 app.delete('/api/attachments/:id', authenticateToken, checkPermission('attachments', 'delete'), apiLimiter, async (req, res) => {
   try {
@@ -3273,7 +3705,6 @@ app.delete('/api/attachments/:id', authenticateToken, checkPermission('attachmen
  * @route GET /api/dashboard/stats
  * @description Get key dashboard metrics
  * @access Private
- * @number 17.1
  */
 app.get('/api/dashboard/stats', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -3284,13 +3715,13 @@ app.get('/api/dashboard/stats', authenticateToken, apiLimiter, async (req, res) 
       { count: activeStaff },
       { count: activeResidents },
       { count: todayOnCall },
-      { count: pendingAbsences }
+      { count: currentlyAbsent }
     ] = await Promise.all([
       supabase.from('medical_staff').select('*', { count: 'exact', head: true }),
       supabase.from('medical_staff').select('*', { count: 'exact', head: true }).eq('employment_status', 'active'),
       supabase.from('medical_staff').select('*', { count: 'exact', head: true }).eq('staff_type', 'medical_resident').eq('employment_status', 'active'),
       supabase.from('oncall_schedule').select('*', { count: 'exact', head: true }).eq('duty_date', today),
-      supabase.from('leave_requests').select('*', { count: 'exact', head: true }).eq('approval_status', 'pending')
+      supabase.from('staff_absence_records').select('*', { count: 'exact', head: true }).eq('current_status', 'currently_absent')
     ]);
     
     const stats = {
@@ -3298,7 +3729,7 @@ app.get('/api/dashboard/stats', authenticateToken, apiLimiter, async (req, res) 
       activeStaff: activeStaff || 0,
       activeResidents: activeResidents || 0,
       todayOnCall: todayOnCall || 0,
-      pendingAbsences: pendingAbsences || 0,
+      currentlyAbsent: currentlyAbsent || 0,
       timestamp: new Date().toISOString()
     };
     
@@ -3312,7 +3743,6 @@ app.get('/api/dashboard/stats', authenticateToken, apiLimiter, async (req, res) 
  * @route GET /api/system-stats
  * @description Get comprehensive system statistics
  * @access Private
- * @number 17.2
  */
 app.get('/api/system-stats', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -3323,7 +3753,7 @@ app.get('/api/system-stats', authenticateToken, apiLimiter, async (req, res) => 
       activeAttendingPromise,
       activeResidentsPromise,
       todayOnCallPromise,
-      pendingApprovalsPromise,
+      currentlyAbsentPromise,
       activeRotationsPromise
     ] = await Promise.all([
       supabase.from('medical_staff').select('*', { count: 'exact', head: true }),
@@ -3333,8 +3763,8 @@ app.get('/api/system-stats', authenticateToken, apiLimiter, async (req, res) => 
         .eq('staff_type', 'medical_resident').eq('employment_status', 'active'),
       supabase.from('oncall_schedule').select('*', { count: 'exact', head: true })
         .eq('duty_date', today),
-      supabase.from('leave_requests').select('*', { count: 'exact', head: true })
-        .eq('approval_status', 'pending'),
+      supabase.from('staff_absence_records').select('*', { count: 'exact', head: true })
+        .eq('current_status', 'currently_absent'),
       supabase.from('resident_rotations').select('*', { count: 'exact', head: true })
         .eq('rotation_status', 'active')
     ]);
@@ -3345,7 +3775,7 @@ app.get('/api/system-stats', authenticateToken, apiLimiter, async (req, res) => 
       activeResidents: activeResidentsPromise.count || 0,
       onCallNow: todayOnCallPromise.count || 0,
       activeRotations: activeRotationsPromise.count || 0,
-      pendingApprovals: pendingApprovalsPromise.count || 0,
+      currentlyAbsent: currentlyAbsentPromise.count || 0,
       departmentStatus: 'normal',
       activePatients: Math.floor(Math.random() * 50 + 20),
       icuOccupancy: Math.floor(Math.random() * 30 + 10),
@@ -3373,7 +3803,6 @@ app.get('/api/system-stats', authenticateToken, apiLimiter, async (req, res) => 
  * @route GET /api/dashboard/upcoming-events
  * @description Get upcoming events for dashboard
  * @access Private
- * @number 17.3
  */
 app.get('/api/dashboard/upcoming-events', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -3406,15 +3835,15 @@ app.get('/api/dashboard/upcoming-events', authenticateToken, apiLimiter, async (
         .limit(5),
       
       supabase
-        .from('leave_requests')
+        .from('staff_absence_records')
         .select(`
           *,
-          staff_member:medical_staff!leave_requests_staff_member_id_fkey(full_name)
+          staff_member:medical_staff!staff_absence_records_staff_member_id_fkey(full_name)
         `)
-        .gte('leave_start_date', today)
-        .lte('leave_start_date', nextWeek)
-        .eq('approval_status', 'approved')
-        .order('leave_start_date')
+        .eq('current_status', 'planned_leave')
+        .gte('start_date', today)
+        .lte('start_date', nextWeek)
+        .order('start_date')
         .limit(5)
     ]);
     
@@ -3434,7 +3863,6 @@ app.get('/api/dashboard/upcoming-events', authenticateToken, apiLimiter, async (
  * @route GET /api/settings
  * @description Get system settings
  * @access Private
- * @number 18.1
  */
 app.get('/api/settings', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -3468,9 +3896,8 @@ app.get('/api/settings', authenticateToken, apiLimiter, async (req, res) => {
 
 /**
  * @route PUT /api/settings
- * @description Update system settings (FIXED)
+ * @description Update system settings
  * @access Private
- * @number 18.2
  */
 app.put('/api/settings', authenticateToken, checkPermission('system_settings', 'update'), validate(schemas.systemSettings), async (req, res) => {
   try {
@@ -3495,7 +3922,6 @@ app.put('/api/settings', authenticateToken, checkPermission('system_settings', '
  * @route GET /api/available-data
  * @description Get dropdown data for forms
  * @access Private
- * @number 19.1
  */
 app.get('/api/available-data', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -3553,7 +3979,6 @@ app.get('/api/available-data', authenticateToken, apiLimiter, async (req, res) =
  * @route GET /api/search/medical-staff
  * @description Search medical staff
  * @access Private
- * @number 19.2
  */
 app.get('/api/search/medical-staff', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -3580,7 +4005,6 @@ app.get('/api/search/medical-staff', authenticateToken, apiLimiter, async (req, 
  * @route GET /api/reports/staff-distribution
  * @description Get staff distribution report
  * @access Private
- * @number 20.1
  */
 app.get('/api/reports/staff-distribution', authenticateToken, checkPermission('medical_staff', 'read'), apiLimiter, async (req, res) => {
   try {
@@ -3618,7 +4042,6 @@ app.get('/api/reports/staff-distribution', authenticateToken, checkPermission('m
  * @route GET /api/reports/rotation-summary
  * @description Get rotation summary report
  * @access Private
- * @number 20.2
  */
 app.get('/api/reports/rotation-summary', authenticateToken, checkPermission('resident_rotations', 'read'), apiLimiter, async (req, res) => {
   try {
@@ -3672,7 +4095,6 @@ app.get('/api/reports/rotation-summary', authenticateToken, checkPermission('res
  * @route GET /api/calendar/events
  * @description Get calendar events for date range
  * @access Private
- * @number 21.1
  */
 app.get('/api/calendar/events', authenticateToken, apiLimiter, async (req, res) => {
   try {
@@ -3707,18 +4129,18 @@ app.get('/api/calendar/events', authenticateToken, apiLimiter, async (req, res) 
         .lte('duty_date', end_date),
       
       supabase
-        .from('leave_requests')
+        .from('staff_absence_records')
         .select(`
           id,
-          leave_start_date,
-          leave_end_date,
-          leave_category,
-          approval_status,
-          staff_member:medical_staff!leave_requests_staff_member_id_fkey(full_name)
+          start_date,
+          end_date,
+          absence_reason,
+          current_status,
+          staff_member:medical_staff!staff_absence_records_staff_member_id_fkey(full_name)
         `)
-        .gte('leave_end_date', start_date)
-        .lte('leave_start_date', end_date)
-        .eq('approval_status', 'approved')
+        .gte('end_date', start_date)
+        .lte('start_date', end_date)
+        .not('current_status', 'eq', 'cancelled')
     ]);
     
     const events = [];
@@ -3750,12 +4172,12 @@ app.get('/api/calendar/events', authenticateToken, apiLimiter, async (req, res) 
     (absences.data || []).forEach(absence => {
       events.push({
         id: absence.id,
-        title: `${absence.staff_member?.full_name || 'Staff'} - ${absence.leave_category}`,
-        start: absence.leave_start_date,
-        end: absence.leave_end_date,
+        title: `${absence.staff_member?.full_name || 'Staff'} - ${absence.absence_reason}`,
+        start: absence.start_date,
+        end: absence.end_date,
         type: 'absence',
-        leave_category: absence.leave_category,
-        color: 'green'
+        absence_reason: absence.absence_reason,
+        color: absence.current_status === 'currently_absent' ? 'red' : 'green'
       });
     });
     
@@ -3771,7 +4193,6 @@ app.get('/api/calendar/events', authenticateToken, apiLimiter, async (req, res) 
  * @route GET /api/export/csv
  * @description Export data as CSV
  * @access Private
- * @number 22.1
  */
 app.get('/api/export/csv', authenticateToken, checkPermission('system_settings', 'read'), apiLimiter, async (req, res) => {
   try {
@@ -3787,8 +4208,8 @@ app.get('/api/export/csv', authenticateToken, checkPermission('system_settings',
         const { data: rotationsData } = await supabase.from('resident_rotations').select('*');
         data = rotationsData;
         break;
-      case 'absences':
-        const { data: absencesData } = await supabase.from('leave_requests').select('*');
+      case 'absence-records':
+        const { data: absencesData } = await supabase.from('staff_absence_records').select('*');
         data = absencesData;
         break;
       default:
@@ -3841,9 +4262,10 @@ app.use('*', (req, res) => {
       '/api/oncall',
       '/api/oncall/today',
       '/api/oncall/upcoming',
-      '/api/absences',
-      '/api/absences/upcoming',
-      '/api/absences/pending',
+      '/api/absence-records',
+      '/api/absence-records/current',
+      '/api/absence-records/upcoming',
+      '/api/absence-records/dashboard/stats',
       '/api/announcements',
       '/api/announcements/urgent',
       '/api/live-status/current',
@@ -3918,26 +4340,26 @@ app.use((err, req, res, next) => {
 const server = app.listen(PORT, '0.0.0.0', () => {
   console.log(`
     ======================================================
-    🏥 NEUMOCARE HOSPITAL MANAGEMENT SYSTEM API v5.1
+    🏥 NEUMOCARE HOSPITAL MANAGEMENT SYSTEM API v5.2
     ======================================================
-    ✅ COMPLETE PRODUCTION-READY API WITH ALL FIXES
+    ✅ COMPLETE WITH NEW ABSENCE RECORDS SYSTEM
     ✅ Server running on port: ${PORT}
     ✅ Environment: ${NODE_ENV}
     ✅ Allowed Origins: ${allowedOrigins.join(', ')}
     ✅ Health check: http://localhost:${PORT}/health
     ✅ Debug CORS: http://localhost:${PORT}/api/debug/cors
     ======================================================
-    📊 ENDPOINT SUMMARY (74 TOTAL):
+    📊 ENDPOINT SUMMARY (84 TOTAL):
     • 5 Debug & Health endpoints
     • 5 Authentication endpoints
     • 8 User management endpoints  
     • 5 Medical staff endpoints
     • 4 Department endpoints
-    • 6 Absence endpoints
+    • 7 Absence Records endpoints (NEW SYSTEM ✅)
     • 4 Training unit endpoints
     • 5 Announcement endpoints
     • 6 Rotation endpoints
-    • 3 Live status endpoints (FIXED ✅)
+    • 3 Live status endpoints
     • 6 On-call endpoints
     • 2 Live updates endpoints
     • 6 Notification endpoints
@@ -3950,16 +4372,15 @@ const server = app.listen(PORT, '0.0.0.0', () => {
     • 1 Calendar endpoint
     • 1 Export endpoint
     ======================================================
-    🔧 ALL CRITICAL FIXES APPLIED:
-    • Fixed rate limit proxy warning (trust proxy: 1)
-    • Added complete schema definitions
-    • Fixed validation middleware with fallback
-    • Fixed ALL POST endpoints with defensive coding
-    • Added comprehensive error logging
-    • All 74 endpoints are fully functional
+    🔧 NEW ABSENCE RECORDS SYSTEM:
+    • Replaced old /api/absences with /api/absence-records
+    • New database schema: staff_absence_records
+    • Auto-calculated status and duration
+    • Audit logging for all changes
+    • Coverage tracking with boolean
     ======================================================
   `);
-}); // <-- THIS LINE WAS MISSING THE CLOSING PARENTHESIS AND SEMICOLON
+});
 
 // Graceful shutdown
 process.on('SIGTERM', () => {
