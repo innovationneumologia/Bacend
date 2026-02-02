@@ -1776,10 +1776,16 @@ app.get('/api/training-units/:id', authenticateToken, apiLimiter, async (req, re
 app.post('/api/training-units', authenticateToken, checkPermission('training_units', 'create'), validate(schemas.trainingUnit), async (req, res) => {
   try {
     const dataSource = req.validatedData || req.body;
+    
+    // Use correct field names that match database
     const unitData = { 
-      ...dataSource, 
-      created_at: new Date().toISOString(), 
-      updated_at: new Date().toISOString() 
+      unit_name: dataSource.unit_name,
+      unit_code: dataSource.unit_code,
+      department_id: dataSource.department_id,
+      supervising_attending_id: dataSource.supervisor_id || dataSource.supervising_attending_id || null,
+      maximum_residents: dataSource.maximum_residents,
+      unit_status: dataSource.unit_status,
+      specialty: dataSource.specialty || dataSource.description || null  // Handle both
     };
     
     const { data, error } = await supabase
