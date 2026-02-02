@@ -258,8 +258,12 @@ medicalStaff: Joi.object({
   department_id: Joi.string().uuid().optional(),
   academic_degree: Joi.string().optional(),
   specialization: Joi.string().optional(),
-  // CHANGE: Use training_year to match your database
-  training_year: Joi.string().optional(),
+  // CHANGE: Make training_year conditional
+  training_year: Joi.when('staff_type', {
+    is: 'medical_resident',
+    then: Joi.string().required(),
+    otherwise: Joi.string().optional().allow('').allow(null)
+  }),
   clinical_certificate: Joi.string().optional(),
   certificate_status: Joi.string().optional()
 }),
