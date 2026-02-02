@@ -71,22 +71,43 @@ const upload = multer({
 });
 
 // ============ CORS CONFIGURATION ============
-// ============ CORS CONFIGURATION ============
 const allowedOrigins = ALLOWED_ORIGINS.split(',');
 
+console.log('🌐 CORS Configuration:', {
+  allowedOrigins,
+  nodeEnv: NODE_ENV
+});
+
+// Enhanced CORS options
 const corsOptions = {
   origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps, curl, postman)
     if (!origin) return callback(null, true);
     
-    if (allowedOrigins.indexOf(origin) !== -1 || 
-        allowedOrigins.includes('*') || 
-        origin.includes('localhost') || 
-        origin.includes('127.0.0.1') ||
-        origin.includes('github.io')) {
+    // Check if origin is in allowed list
+    const isAllowed = allowedOrigins.some(allowedOrigin => {
+      // Exact match
+      if (origin === allowedOrigin) return true;
+      // Wildcard match
+      if (allowedOrigin === '*') return true;
+      // Subdomain match (e.g., *.github.io)
+      if (allowedOrigin.includes('*')) {
+        const regex = new RegExp(allowedOrigin.replace('*', '.*'));
+        return regex.test(origin);
+      }
+      // Localhost variations
+      if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
+        return allowedOrigins.some(o => o.includes('localhost') || o.includes('127.0.0.1'));
+      }
+      return false;
+    });
+    
+    if (isAllowed) {
+      console.log(`✅ CORS allowed for origin: ${origin}`);
       callback(null, true);
     } else {
-      console.log('⚠️ CORS blocked origin:', origin);
-      callback(new Error('Not allowed by CORS'));
+      console.log(`❌ CORS blocked for origin: ${origin}`);
+      callback(new Error(`CORS policy: Origin ${origin} not allowed`));
     }
   },
   credentials: true,
@@ -105,33 +126,45 @@ const corsOptions = {
   maxAge: 86400
 };
 
-// Apply CORS middleware globally
+// Apply CORS middleware globally with options
 app.use(cors(corsOptions));
+
+// Handle preflight requests
 app.options('*', cors(corsOptions));
 
-// Additional CORS headers
+// Additional CORS headers middleware
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   
-  if (allowedOrigins.includes(origin) || 
-      allowedOrigins.includes('*') || 
-      !origin || 
-      origin.includes('localhost') || 
-      origin.includes('127.0.0.1') ||
-      origin.includes('github.io')) {
-    res.header('Access-Control-Allow-Origin', origin || '*');
+  // Log all requests for debugging
+  console.log(`📡 Request from origin: ${origin || 'no-origin'} to ${req.method} ${req.url}`);
+  
+  // Check if origin is allowed
+  const isOriginAllowed = allowedOrigins.some(allowedOrigin => {
+    if (!origin) return false;
+    if (allowedOrigin === '*') return true;
+    if (allowedOrigin === origin) return true;
+    if (origin.includes('github.io') && allowedOrigin.includes('github.io')) return true;
+    return false;
+  });
+  
+  if (isOriginAllowed) {
+    res.header('Access-Control-Allow-Origin', origin);
+    console.log(`✅ Setting Access-Control-Allow-Origin to: ${origin}`);
+  } else if (!origin) {
+    // For requests without origin (like server-to-server)
+    res.header('Access-Control-Allow-Origin', '*');
   }
   
   res.header('Access-Control-Allow-Credentials', 'true');
   res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
   res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+  res.header('Access-Control-Expose-Headers', 'Content-Range, X-Content-Range');
   
+  // Handle preflight requests
   if (req.method === 'OPTIONS') {
-    console.log(`✅ OPTIONS pre-flight request for: ${req.url}`);
-    return res.status(200).json({
-      status: 'pre-flight OK',
-      timestamp: new Date().toISOString()
-    });
+    console.log(`🛫 Handling OPTIONS preflight for: ${req.url}`);
+    return res.status(200).end();
   }
   
   next();
