@@ -292,14 +292,16 @@ rotation: Joi.object({
   
   // For POST /api/oncall
   onCall: Joi.object({
-    duty_date: Joi.date().required(),
-    shift_type: Joi.string().valid('primary', 'backup', 'secondary').default('primary'),
-    start_time: Joi.string().pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).required(),
-    end_time: Joi.string().pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).required(),
-    primary_physician_id: Joi.string().uuid().required(),
-    backup_physician_id: Joi.string().uuid().optional(),
-    coverage_area: Joi.string().valid('emergency', 'ward', 'icu', 'clinic').default('emergency')
-  }),
+  duty_date: Joi.date().required(),
+  shift_type: Joi.string().valid('primary', 'backup', 'secondary').default('primary'),
+  start_time: Joi.string().pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).required(),
+  end_time: Joi.string().pattern(/^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$/).required(),
+  primary_physician_id: Joi.string().uuid().required(),
+  backup_physician_id: Joi.string().uuid().optional().allow(null),
+  coverage_notes: Joi.string().optional().allow(''),  // ✅ Correct column name
+  schedule_id: Joi.string().optional(),  // ✅ Add schedule_id
+  created_by: Joi.string().uuid().optional().allow(null)
+}),
   
   // For POST /api/absences
   absence: Joi.object({
