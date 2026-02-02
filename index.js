@@ -223,7 +223,7 @@ medicalStaff: Joi.object({
   department_id: Joi.string().uuid().optional(),
   academic_degree: Joi.string().optional(),
   specialization: Joi.string().optional(),
-  // Change from resident_year to training_year (or keep as is if you rename column)
+  // Change from resident_year to training_year
   training_year: Joi.string().optional(),
   clinical_certificate: Joi.string().optional(),
   certificate_status: Joi.string().optional()
@@ -1358,6 +1358,39 @@ app.post('/api/medical-staff', authenticateToken, checkPermission('medical_staff
       });
     }
     
+/**
+ * @route POST /api/medical-staff
+ * @description Create new medical staff (FIXED)
+ * @access Private
+ * @number 5.3
+ */
+app.post('/api/medical-staff', authenticateToken, checkPermission('medical_staff', 'create'), validate(schemas.medicalStaff), async (req, res) => {
+  try {
+    console.log('🩺 Creating medical staff...');
+    const dataSource = req.validatedData || req.body;
+    
+    // Validate required fields
+    if (!dataSource.full_name) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        message: 'Full name is required'
+      });
+    }
+    
+    if (!dataSource.staff_type) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        message: 'Staff type is required'
+      });
+    }
+    
+    if (!dataSource.professional_email) {
+      return res.status(400).json({
+        error: 'Validation failed',
+        message: 'Professional email is required'
+      });
+    }
+    
     const staffData = {
       full_name: dataSource.full_name,
       staff_type: dataSource.staff_type,
@@ -1367,7 +1400,8 @@ app.post('/api/medical-staff', authenticateToken, checkPermission('medical_staff
       department_id: dataSource.department_id || null,
       academic_degree: dataSource.academic_degree || null,
       specialization: dataSource.specialization || null,
-      resident_year: dataSource.resident_year || null,
+      // CHANGE THIS: Use training_year instead of resident_year
+      training_year: dataSource.training_year || dataSource.resident_year || null,
       clinical_certificate: dataSource.clinical_certificate || null,
       certificate_status: dataSource.certificate_status || null,
       created_at: new Date().toISOString(),
@@ -1405,51 +1439,7 @@ app.post('/api/medical-staff', authenticateToken, checkPermission('medical_staff
   }
 });
 
-/**
- * @route PUT /api/medical-staff/:id
- * @description Update medical staff (FIXED)
- * @access Private
- * @number 5.4
- */
-app.put('/api/medical-staff/:id', authenticateToken, checkPermission('medical_staff', 'update'), validate(schemas.medicalStaff), async (req, res) => {
-  try {
-    const { id } = req.params;
-    const dataSource = req.validatedData || req.body;
-    
-    const staffData = { 
-      full_name: dataSource.full_name,
-      staff_type: dataSource.staff_type,
-      staff_id: dataSource.staff_id || undefined,
-      employment_status: dataSource.employment_status || 'active',
-      professional_email: dataSource.professional_email,
-      department_id: dataSource.department_id || null,
-      academic_degree: dataSource.academic_degree || null,
-      specialization: dataSource.specialization || null,
-      resident_year: dataSource.resident_year || null,
-      clinical_certificate: dataSource.clinical_certificate || null,
-      certificate_status: dataSource.certificate_status || null,
-      updated_at: new Date().toISOString() 
-    };
-    
-    const { data, error } = await supabase
-      .from('medical_staff')
-      .update(staffData)
-      .eq('id', id)
-      .select()
-      .single();
-    
-    if (error) {
-      if (error.code === 'PGRST116') {
-        return res.status(404).json({ error: 'Medical staff not found' });
-      }
-      throw error;
-    }
-    
-    res.json(data);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to update medical staff', message: error.message });
-  }
-});
+
 
 /**
  * @route DELETE /api/medical-staff/:id
