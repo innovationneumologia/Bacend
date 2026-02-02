@@ -71,6 +71,7 @@ const upload = multer({
 });
 
 // ============ CORS CONFIGURATION ============
+// ============ CORS CONFIGURATION ============
 const allowedOrigins = ALLOWED_ORIGINS.split(',');
 
 const corsOptions = {
@@ -80,7 +81,8 @@ const corsOptions = {
     if (allowedOrigins.indexOf(origin) !== -1 || 
         allowedOrigins.includes('*') || 
         origin.includes('localhost') || 
-        origin.includes('127.0.0.1')) {
+        origin.includes('127.0.0.1') ||
+        origin.includes('github.io')) {
       callback(null, true);
     } else {
       console.log('⚠️ CORS blocked origin:', origin);
@@ -115,7 +117,8 @@ app.use((req, res, next) => {
       allowedOrigins.includes('*') || 
       !origin || 
       origin.includes('localhost') || 
-      origin.includes('127.0.0.1')) {
+      origin.includes('127.0.0.1') ||
+      origin.includes('github.io')) {
     res.header('Access-Control-Allow-Origin', origin || '*');
   }
   
@@ -133,7 +136,6 @@ app.use((req, res, next) => {
   
   next();
 });
-
 // ============ MIDDLEWARE CONFIGURATION ============
 
 // Rate Limiting
