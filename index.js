@@ -3502,6 +3502,7 @@ app.get('/api/dashboard/stats', authenticateToken, apiLimiter, async (req, res) 
   }
 });
 
+// Add this endpoint to your backend
 app.get('/api/system-stats', authenticateToken, apiLimiter, async (req, res) => {
   try {
     const today = new Date().toISOString().split('T')[0];
@@ -3512,7 +3513,8 @@ app.get('/api/system-stats', authenticateToken, apiLimiter, async (req, res) => 
       activeResidentsPromise,
       todayOnCallPromise,
       currentlyAbsentPromise,
-      activeRotationsPromise
+      clinicalUnitsPromise,
+      researchLinesPromise
     ] = await Promise.all([
       supabase.from('medical_staff').select('*', { count: 'exact', head: true }),
       supabase.from('medical_staff').select('*', { count: 'exact', head: true })
@@ -3523,8 +3525,10 @@ app.get('/api/system-stats', authenticateToken, apiLimiter, async (req, res) => 
         .eq('duty_date', today),
       supabase.from('staff_absence_records').select('*', { count: 'exact', head: true })
         .eq('current_status', 'currently_absent'),
-      supabase.from('resident_rotations').select('*', { count: 'exact', head: true })
-        .eq('rotation_status', 'active')
+      supabase.from('training_units').select('*', { count: 'exact', head: true })
+        .eq('unit_status', 'active'),
+      supabase.from('research_lines').select('*', { count: 'exact', head: true })
+        .eq('active', true)
     ]);
     
     const stats = {
@@ -3532,20 +3536,16 @@ app.get('/api/system-stats', authenticateToken, apiLimiter, async (req, res) => 
       activeAttending: activeAttendingPromise.count || 0,
       activeResidents: activeResidentsPromise.count || 0,
       onCallNow: todayOnCallPromise.count || 0,
-      activeRotations: activeRotationsPromise.count || 0,
+      clinicalUnits: clinicalUnitsPromise.count || 0,
+      researchLines: researchLinesPromise.count || 0,
       currentlyAbsent: currentlyAbsentPromise.count || 0,
-      departmentStatus: 'normal',
-      activePatients: Math.floor(Math.random() * 50 + 20),
-      icuOccupancy: Math.floor(Math.random() * 30 + 10),
-      wardOccupancy: Math.floor(Math.random() * 80 + 40),
-      nextShiftChange: new Date(Date.now() + 6 * 60 * 60 * 1000).toISOString(),
-      timestamp: new Date().toISOString()
+      activeRotations: 0, // You might need to query this
+      departmentStatus: 'normal'
     };
     
     res.json({
       success: true,
-      data: stats,
-      message: 'Dashboard statistics retrieved successfully'
+      data: stats
     });
     
   } catch (error) {
