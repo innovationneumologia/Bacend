@@ -233,7 +233,7 @@ medicalStaff: Joi.object({
   professional_email: Joi.string().email().required(),
   department_id: Joi.string().uuid().optional(),
   academic_degree: Joi.string().optional(),
-  specialization: Joi.string().optional(),
+  specialization: Joi.string().optional().allow('', null),
   training_year: Joi.when('staff_type', {
     is: 'medical_resident',
     then: Joi.string().required(),
@@ -242,7 +242,7 @@ medicalStaff: Joi.object({
   // REMOVE THIS LINE ↓
   // clinical_certificate: Joi.string().optional(),
   // ADD THIS INSTEAD if you want to accept it from frontend but map it:
-  clinical_study_certificate: Joi.string().optional(),
+  clinical_certificate: Joi.string().optional().allow('', null),
   certificate_status: Joi.string().optional()
 }),
   
