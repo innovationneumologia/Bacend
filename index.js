@@ -79,18 +79,22 @@ console.log('🌐 CORS Configuration:', {
 
 const corsOptions = {
   origin: function (origin, callback) {
+    // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
     
     const isAllowed = allowedOrigins.some(allowedOrigin => {
-      if (origin === allowedOrigin) return true;
       if (allowedOrigin === '*') return true;
+      if (allowedOrigin === origin) return true;
+      
+      // Check for wildcard subdomains
       if (allowedOrigin.includes('*')) {
-        const regex = new RegExp(allowedOrigin.replace('*', '.*'));
+        const regex = new RegExp(allowedOrigin.replace(/\*/g, '.*'));
         return regex.test(origin);
       }
-      if (origin.includes('localhost') || origin.includes('127.0.0.1')) {
-        return allowedOrigins.some(o => o.includes('localhost') || o.includes('127.0.0.1'));
-      }
+      
+      // Check if origin matches allowed origin pattern
+      if (origin.startsWith(allowedOrigin)) return true;
+      
       return false;
     });
     
@@ -98,12 +102,12 @@ const corsOptions = {
       console.log(`✅ CORS allowed for origin: ${origin}`);
       callback(null, true);
     } else {
-      console.log(`❌ CORS blocked for origin: ${origin}`);
+      console.log(`❌ CORS blocked for origin: ${origin} - Not in allowed list`);
       callback(new Error(`CORS policy: Origin ${origin} not allowed`));
     }
   },
   credentials: true,
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH', 'HEAD'],
   allowedHeaders: [
     'Content-Type', 
     'Authorization', 
@@ -112,42 +116,47 @@ const corsOptions = {
     'Origin',
     'Access-Control-Allow-Headers',
     'Access-Control-Request-Method',
-    'Access-Control-Request-Headers'
+    'Access-Control-Request-Headers',
+    'X-API-Key',
+    'X-Request-ID'
   ],
-  exposedHeaders: ['Content-Range', 'X-Content-Range'],
-  maxAge: 86400
+  exposedHeaders: [
+    'Content-Range', 
+    'X-Content-Range',
+    'Access-Control-Allow-Origin',
+    'Access-Control-Allow-Credentials'
+  ],
+  maxAge: 86400,
+  preflightContinue: false,
+  optionsSuccessStatus: 204
 };
 
+// Apply CORS middleware
 app.use(cors(corsOptions));
-app.options('*', cors(corsOptions));
+app.options('*', cors(corsOptions)); // Enable pre-flight for all routes
 
+// Add custom headers middleware
 app.use((req, res, next) => {
   const origin = req.headers.origin;
   
-  console.log(`📡 Request from origin: ${origin || 'no-origin'} to ${req.method} ${req.url}`);
-  
-  const isOriginAllowed = allowedOrigins.some(allowedOrigin => {
-    if (!origin) return false;
-    if (allowedOrigin === '*') return true;
-    if (allowedOrigin === origin) return true;
-    if (origin.includes('github.io') && allowedOrigin.includes('github.io')) return true;
-    return false;
-  });
-  
-  if (isOriginAllowed) {
+  // Check if origin is allowed
+  if (origin && allowedOrigins.some(o => o === '*' || o === origin || origin.includes(o))) {
     res.header('Access-Control-Allow-Origin', origin);
     console.log(`✅ Setting Access-Control-Allow-Origin to: ${origin}`);
-  } else if (!origin) {
+  } else if (NODE_ENV === 'development') {
+    // In development, allow any origin
     res.header('Access-Control-Allow-Origin', '*');
   }
   
   res.header('Access-Control-Allow-Credentials', 'true');
-  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin');
+  res.header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS, PATCH, HEAD');
+  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Requested-With, Accept, Origin, X-API-Key');
   res.header('Access-Control-Expose-Headers', 'Content-Range, X-Content-Range');
+  res.header('Access-Control-Max-Age', '86400');
   
+  // Handle preflight requests
   if (req.method === 'OPTIONS') {
-    console.log(`🛫 Handling OPTIONS preflight for: ${req.url}`);
+    console.log(`🛫 Handling OPTIONS preflight for: ${req.url} from ${origin}`);
     return res.status(200).end();
   }
   
