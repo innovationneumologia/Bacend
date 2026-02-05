@@ -234,26 +234,25 @@ const generatePassword = () => crypto.randomBytes(8).toString('hex');
 const hashPassword = async (password) => await bcrypt.hash(password, 10);
 
 // ============ VALIDATION SCHEMAS ============
-medicalStaff: Joi.object({
-  full_name: Joi.string().required(),
-  staff_type: Joi.string().valid('medical_resident', 'attending_physician', 'fellow', 'nurse_practitioner', 'administrator').required(),
-  staff_id: Joi.string().optional(),
-  employment_status: Joi.string().valid('active', 'on_leave', 'inactive').default('active'),
-  professional_email: Joi.string().email().required(),
-  department_id: Joi.string().uuid().optional(),
-  academic_degree: Joi.string().optional(),
-  specialization: Joi.string().optional().allow('', null),
-  training_year: Joi.when('staff_type', {
-    is: 'medical_resident',
-    then: Joi.string().required(),
-    otherwise: Joi.string().optional().allow('').allow(null)
+// ============ VALIDATION SCHEMAS ============
+const schemas = {
+  medicalStaff: Joi.object({
+    full_name: Joi.string().required(),
+    staff_type: Joi.string().valid('medical_resident', 'attending_physician', 'fellow', 'nurse_practitioner', 'administrator').required(),
+    staff_id: Joi.string().optional(),
+    employment_status: Joi.string().valid('active', 'on_leave', 'inactive').default('active'),
+    professional_email: Joi.string().email().required(),
+    department_id: Joi.string().uuid().optional(),
+    academic_degree: Joi.string().optional(),
+    specialization: Joi.string().optional().allow('', null),
+    training_year: Joi.when('staff_type', {
+      is: 'medical_resident',
+      then: Joi.string().required(),
+      otherwise: Joi.string().optional().allow('').allow(null)
+    }),
+    clinical_certificate: Joi.string().optional().allow('', null),
+    certificate_status: Joi.string().optional()
   }),
-  // REMOVE THIS LINE ↓
-  // clinical_certificate: Joi.string().optional(),
-  // ADD THIS INSTEAD if you want to accept it from frontend but map it:
-  clinical_certificate: Joi.string().optional().allow('', null),
-  certificate_status: Joi.string().optional()
-}),
   
   announcement: Joi.object({
     title: Joi.string().required(),
@@ -303,8 +302,6 @@ medicalStaff: Joi.object({
     coverage_notes: Joi.string().optional().allow(''),
     hod_notes: Joi.string().optional().allow('')
   }),
-  
-  // REMOVED: Old absence schema
   
   register: Joi.object({
     email: Joi.string().email().required(),
