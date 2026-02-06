@@ -250,7 +250,7 @@ const schemas = {
       then: Joi.string().required(),
       otherwise: Joi.string().optional().allow('').allow(null)
     }),
-    clinical_certificate: Joi.string().optional().allow('', null),
+    clinical_study_certificate: Joi.string().optional().allow('', null),
     certificate_status: Joi.string().optional()
   }),
   
