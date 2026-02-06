@@ -1422,7 +1422,6 @@ app.post('/api/medical-staff', authenticateToken, checkPermission('medical_staff
     });
   }
 });
-});
 /**
  * @route PUT /api/medical-staff/:id
  * @description Update medical staff
