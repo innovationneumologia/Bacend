@@ -1456,7 +1456,7 @@ app.put('/api/medical-staff/:id', authenticateToken, checkPermission('medical_st
       academic_degree: dataSource.academic_degree || null,
       specialization: dataSource.specialization || null,
       training_year: trainingYearValue,
-      clinical_certificate: dataSource.clinical_certificate || null,
+      clinical_study_certificate: dataSource.clinical_certificate || null,
       certificate_status: dataSource.certificate_status || null,
       updated_at: new Date().toISOString()
     };
