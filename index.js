@@ -1358,30 +1358,22 @@ app.post('/api/medical-staff', authenticateToken, checkPermission('medical_staff
       });
     }
     
-    // ✅ CREATE THE staffData OBJECT CORRECTLY
+    // ✅ FIXED: Map frontend field to correct database column
     const staffData = {
-      // Required fields
       full_name: dataSource.full_name,
       staff_type: dataSource.staff_type,
+      staff_id: dataSource.staff_id || generateId('MD'),
       professional_email: dataSource.professional_email,
       employment_status: dataSource.employment_status || 'active',
-      
-      // ID fields
-      staff_id: dataSource.staff_id || `MD-${Date.now().toString().slice(-6)}`,
-      
-      // Optional fields
       department_id: dataSource.department_id || null,
       academic_degree: dataSource.academic_degree || null,
       specialization: dataSource.specialization || null,
+      training_year: dataSource.training_year || null,
       
-      // Training year - handle string or number
-      training_year: dataSource.training_year || dataSource.resident_year || null,
+      // ✅ FIXED: Use correct column name from your database
+      clinical_study_certificate: dataSource.clinical_certificate || null,
       
-      // Certificate fields
-      clinical_certificate: dataSource.clinical_certificate || null,
       certificate_status: dataSource.certificate_status || null,
-      
-      // Other fields from your schema
       resident_category: dataSource.resident_category || null,
       primary_clinic: dataSource.primary_clinic || null,
       work_phone: dataSource.work_phone || null,
@@ -1397,13 +1389,10 @@ app.post('/api/medical-staff', authenticateToken, checkPermission('medical_staff
       mobile_phone: dataSource.mobile_phone || null,
       office_phone: dataSource.office_phone || null,
       training_level: dataSource.training_level || null,
-      
-      // Timestamps
-      created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
     
-    console.log('💾 Inserting medical staff:', staffData);
+    console.log('💾 Inserting medical staff with corrected column names:', staffData);
     
     const { data, error } = await supabase
       .from('medical_staff')
@@ -1419,22 +1408,6 @@ app.post('/api/medical-staff', authenticateToken, checkPermission('medical_staff
           message: 'A staff member with this email or ID already exists' 
         });
       }
-      
-      // More specific error messages
-      if (error.code === '23503') {
-        return res.status(400).json({ 
-          error: 'Invalid reference', 
-          message: 'Department not found' 
-        });
-      }
-      
-      if (error.code === '22P02') {
-        return res.status(400).json({ 
-          error: 'Invalid data type', 
-          message: 'Check that all fields have correct data types (numbers for years_experience, etc.)' 
-        });
-      }
-      
       throw error;
     }
     
@@ -1448,6 +1421,7 @@ app.post('/api/medical-staff', authenticateToken, checkPermission('medical_staff
       message: error.message 
     });
   }
+});
 });
 /**
  * @route PUT /api/medical-staff/:id
