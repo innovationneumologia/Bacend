@@ -1358,46 +1358,50 @@ app.post('/api/medical-staff', authenticateToken, checkPermission('medical_staff
       });
     }
     
-    function mapStaffData(frontendData) {
-  return {
-    // Map all 30 columns from your schema
-    full_name: frontendData.full_name,
-    staff_type: frontendData.staff_type,
-    staff_id: frontendData.staff_id,
-    professional_email: frontendData.professional_email,
-    employment_status: frontendData.employment_status || 'active',
-    department_id: frontendData.department_id || null,
-    academic_degree: frontendData.academic_degree || null,
-    specialization: frontendData.specialization || null,
-    training_year: frontendData.training_year || null,
-    
-    // THE FIX: Map clinical_certificate to clinical_study_certificate
-    clinical_study_certificate: frontendData.clinical_certificate || frontendData.clinical_study_certificate || null,
-    
-    certificate_status: frontendData.certificate_status || null,
-    resident_category: frontendData.resident_category || null,
-    primary_clinic: frontendData.primary_clinic || null,
-    work_phone: frontendData.work_phone || null,
-    medical_license: frontendData.medical_license || null,
-    can_supervise_residents: frontendData.can_supervise_residents || false,
-    special_notes: frontendData.special_notes || null,
-    resident_type: frontendData.resident_type || null,
-    home_department: frontendData.home_department || null,
-    external_institution: frontendData.external_institution || null,
-    years_experience: frontendData.years_experience || null,
-    biography: frontendData.biography || null,
-    date_of_birth: frontendData.date_of_birth || null,
-    mobile_phone: frontendData.mobile_phone || null,
-    office_phone: frontendData.office_phone || null,
-    training_level: frontendData.training_level || null,
-    
-    // Always update timestamp
-    updated_at: new Date().toISOString()
-  };
-}
-
-// Then use it:
-const updateData = mapStaffData(dataSource);
+    // ✅ CREATE THE staffData OBJECT CORRECTLY
+    const staffData = {
+      // Required fields
+      full_name: dataSource.full_name,
+      staff_type: dataSource.staff_type,
+      professional_email: dataSource.professional_email,
+      employment_status: dataSource.employment_status || 'active',
+      
+      // ID fields
+      staff_id: dataSource.staff_id || `MD-${Date.now().toString().slice(-6)}`,
+      
+      // Optional fields
+      department_id: dataSource.department_id || null,
+      academic_degree: dataSource.academic_degree || null,
+      specialization: dataSource.specialization || null,
+      
+      // Training year - handle string or number
+      training_year: dataSource.training_year || dataSource.resident_year || null,
+      
+      // Certificate fields
+      clinical_certificate: dataSource.clinical_certificate || null,
+      certificate_status: dataSource.certificate_status || null,
+      
+      // Other fields from your schema
+      resident_category: dataSource.resident_category || null,
+      primary_clinic: dataSource.primary_clinic || null,
+      work_phone: dataSource.work_phone || null,
+      medical_license: dataSource.medical_license || null,
+      can_supervise_residents: dataSource.can_supervise_residents || false,
+      special_notes: dataSource.special_notes || null,
+      resident_type: dataSource.resident_type || null,
+      home_department: dataSource.home_department || null,
+      external_institution: dataSource.external_institution || null,
+      years_experience: dataSource.years_experience || null,
+      biography: dataSource.biography || null,
+      date_of_birth: dataSource.date_of_birth || null,
+      mobile_phone: dataSource.mobile_phone || null,
+      office_phone: dataSource.office_phone || null,
+      training_level: dataSource.training_level || null,
+      
+      // Timestamps
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
     
     console.log('💾 Inserting medical staff:', staffData);
     
@@ -1415,6 +1419,22 @@ const updateData = mapStaffData(dataSource);
           message: 'A staff member with this email or ID already exists' 
         });
       }
+      
+      // More specific error messages
+      if (error.code === '23503') {
+        return res.status(400).json({ 
+          error: 'Invalid reference', 
+          message: 'Department not found' 
+        });
+      }
+      
+      if (error.code === '22P02') {
+        return res.status(400).json({ 
+          error: 'Invalid data type', 
+          message: 'Check that all fields have correct data types (numbers for years_experience, etc.)' 
+        });
+      }
+      
       throw error;
     }
     
@@ -1429,7 +1449,6 @@ const updateData = mapStaffData(dataSource);
     });
   }
 });
-
 /**
  * @route PUT /api/medical-staff/:id
  * @description Update medical staff
