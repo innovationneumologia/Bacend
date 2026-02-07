@@ -4258,6 +4258,492 @@ app.get('/api/export/csv', authenticateToken, checkPermission('system_settings',
     res.status(500).json({ error: 'Failed to export data', message: error.message });
   }
 });
+// ===== 23. DOCTOR PROFILE ENDPOINTS =====
+
+/**
+ * @route GET /api/medical-staff/:id/complete-profile
+ * @description Get complete doctor profile with all aggregated data
+ * @access Private
+ */
+app.get('/api/medical-staff/:id/complete-profile', authenticateToken, apiLimiter, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    console.log(`🩺 Fetching complete profile for doctor: ${id}`);
+    
+    // Start all queries in parallel for performance
+    const [
+      basicInfo,
+      currentAssignments,
+      upcomingAssignments,
+      oncallSchedule,
+      absenceHistory,
+      currentStatus,
+      notificationStats,
+      recentActivity
+    ] = await Promise.all([
+      // 1. Basic information with department
+      supabase
+        .from('medical_staff')
+        .select(`
+          *,
+          departments!medical_staff_department_id_fkey(
+            id, name, code, description, head_of_department_id
+          )
+        `)
+        .eq('id', id)
+        .single(),
+      
+      // 2. Current rotations/supervisions
+      supabase
+        .from('resident_rotations')
+        .select(`
+          *,
+          resident:medical_staff!resident_rotations_resident_id_fkey(full_name, professional_email),
+          training_unit:training_units!resident_rotations_training_unit_id_fkey(unit_name, unit_code)
+        `)
+        .or(`resident_id.eq.${id},supervising_attending_id.eq.${id}`)
+        .eq('rotation_status', 'active')
+        .order('start_date', { ascending: true }),
+      
+      // 3. Upcoming assignments
+      supabase
+        .from('resident_rotations')
+        .select(`
+          id, start_date, end_date, rotation_status,
+          training_unit:training_units!resident_rotations_training_unit_id_fkey(unit_name)
+        `)
+        .or(`resident_id.eq.${id},supervising_attending_id.eq.${id}`)
+        .eq('rotation_status', 'upcoming')
+        .order('start_date', { ascending: true })
+        .limit(5),
+      
+      // 4. On-call schedule (next 30 days)
+      supabase
+        .from('oncall_schedule')
+        .select(`
+          id, duty_date, shift_type, start_time, end_time,
+          backup_physician:medical_staff!oncall_schedule_backup_physician_id_fkey(full_name)
+        `)
+        .or(`primary_physician_id.eq.${id},backup_physician_id.eq.${id}`)
+        .gte('duty_date', new Date().toISOString().split('T')[0])
+        .lte('duty_date', new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0])
+        .order('duty_date', { ascending: true }),
+      
+      // 5. Absence history (last 6 months)
+      supabase
+        .from('staff_absence_records')
+        .select('*')
+        .eq('staff_member_id', id)
+        .gte('start_date', new Date(Date.now() - 180 * 24 * 60 * 60 * 1000).toISOString().split('T')[0])
+        .order('start_date', { ascending: false })
+        .limit(10),
+      
+      // 6. Current live status
+      supabase
+        .from('clinical_status_updates')
+        .select('*')
+        .eq('author_id', id)
+        .gt('expires_at', new Date().toISOString())
+        .eq('is_active', true)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .single(),
+      
+      // 7. Notification stats
+      supabase
+        .from('notifications')
+        .select('*', { count: 'exact', head: false })
+        .or(`recipient_id.eq.${id},recipient_role.eq.all`)
+        .eq('is_read', false),
+      
+      // 8. Recent activity (last 7 days)
+      supabase
+        .from('audit_logs')
+        .select('*')
+        .eq('user_id', id)
+        .gte('created_at', new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString())
+        .order('created_at', { ascending: false })
+        .limit(10)
+    ]);
+    
+    // Check if doctor exists
+    if (basicInfo.error || !basicInfo.data) {
+      return res.status(404).json({ 
+        error: 'Doctor not found', 
+        message: 'No medical staff found with this ID' 
+      });
+    }
+    
+    // Calculate metrics
+    const totalResidentsSupervised = currentAssignments.data?.filter(
+      assignment => assignment.supervising_attending_id === id
+    ).length || 0;
+    
+    const totalRotations = (currentAssignments.data?.length || 0) + (upcomingAssignments.data?.length || 0);
+    
+    const upcomingOnCall = oncallSchedule.data?.filter(
+      schedule => schedule.duty_date >= new Date().toISOString().split('T')[0]
+    ).length || 0;
+    
+    const profileCompleteness = this.calculateProfileCompleteness(basicInfo.data);
+    
+    // Transform data into clean format
+    const completeProfile = {
+      basic_info: {
+        id: basicInfo.data.id,
+        full_name: basicInfo.data.full_name,
+        staff_type: basicInfo.data.staff_type,
+        staff_id: basicInfo.data.staff_id,
+        professional_email: basicInfo.data.professional_email,
+        employment_status: basicInfo.data.employment_status,
+        academic_degree: basicInfo.data.academic_degree,
+        specialization: basicInfo.data.specialization,
+        training_year: basicInfo.data.training_year,
+        clinical_certificate: basicInfo.data.clinical_study_certificate,
+        certificate_status: basicInfo.data.certificate_status,
+        medical_license: basicInfo.data.medical_license,
+        years_experience: basicInfo.data.years_experience,
+        biography: basicInfo.data.biography,
+        date_of_birth: basicInfo.data.date_of_birth,
+        contact_info: {
+          mobile_phone: basicInfo.data.mobile_phone,
+          office_phone: basicInfo.data.office_phone,
+          work_phone: basicInfo.data.work_phone,
+          professional_email: basicInfo.data.professional_email
+        },
+        can_supervise_residents: basicInfo.data.can_supervise_residents,
+        updated_at: basicInfo.data.updated_at
+      },
+      department: basicInfo.data.departments ? {
+        id: basicInfo.data.departments.id,
+        name: basicInfo.data.departments.name,
+        code: basicInfo.data.departments.code,
+        description: basicInfo.data.departments.description,
+        is_head: basicInfo.data.departments.head_of_department_id === id
+      } : null,
+      current_assignments: currentAssignments.data?.map(assignment => ({
+        id: assignment.id,
+        type: assignment.resident_id === id ? 'rotation' : 'supervision',
+        start_date: assignment.start_date,
+        end_date: assignment.end_date,
+        rotation_status: assignment.rotation_status,
+        rotation_category: assignment.rotation_category,
+        clinical_notes: assignment.clinical_notes,
+        training_unit: assignment.training_unit ? {
+          unit_name: assignment.training_unit.unit_name,
+          unit_code: assignment.training_unit.unit_code
+        } : null,
+        resident: assignment.resident_id === id ? null : (assignment.resident ? {
+          full_name: assignment.resident.full_name,
+          professional_email: assignment.resident.professional_email
+        } : null)
+      })) || [],
+      upcoming_assignments: upcomingAssignments.data?.map(assignment => ({
+        id: assignment.id,
+        start_date: assignment.start_date,
+        end_date: assignment.end_date,
+        rotation_status: assignment.rotation_status,
+        training_unit: assignment.training_unit ? {
+          unit_name: assignment.training_unit.unit_name
+        } : null
+      })) || [],
+      oncall_schedule: oncallSchedule.data?.map(schedule => ({
+        id: schedule.id,
+        duty_date: schedule.duty_date,
+        shift_type: schedule.shift_type,
+        start_time: schedule.start_time,
+        end_time: schedule.end_time,
+        role: schedule.primary_physician_id === id ? 'primary' : 'backup',
+        backup_physician: schedule.backup_physician?.full_name || null,
+        is_upcoming: schedule.duty_date >= new Date().toISOString().split('T')[0]
+      })) || [],
+      absence_history: absenceHistory.data?.map(absence => ({
+        id: absence.id,
+        absence_type: absence.absence_type,
+        absence_reason: absence.absence_reason,
+        start_date: absence.start_date,
+        end_date: absence.end_date,
+        coverage_arranged: absence.coverage_arranged,
+        current_status: absence.current_status,
+        duration_days: this.calculateDays(absence.start_date, absence.end_date),
+        hod_notes: absence.hod_notes
+      })) || [],
+      current_status: currentStatus.data ? {
+        status_text: currentStatus.data.status_text,
+        created_at: currentStatus.data.created_at,
+        expires_at: currentStatus.data.expires_at,
+        is_active: currentStatus.data.is_active
+      } : null,
+      notifications: {
+        unread_count: notificationStats.data?.length || 0,
+        urgent_count: notificationStats.data?.filter(n => n.priority === 'urgent').length || 0
+      },
+      recent_activity: recentActivity.data?.map(activity => ({
+        action: activity.action,
+        resource: activity.resource,
+        created_at: activity.created_at,
+        details: activity.details
+      })) || [],
+      metrics: {
+        total_rotations: totalRotations,
+        residents_supervised: totalResidentsSupervised,
+        upcoming_oncall_shifts: upcomingOnCall,
+        total_absences_last_6m: absenceHistory.data?.length || 0,
+        profile_completeness: profileCompleteness + '%',
+        active_since: this.calculateActiveSince(basicInfo.data.created_at)
+      }
+    };
+    
+    res.json({
+      success: true,
+      data: completeProfile,
+      generated_at: new Date().toISOString(),
+      data_sources: [
+        'medical_staff',
+        'resident_rotations', 
+        'oncall_schedule',
+        'staff_absence_records',
+        'clinical_status_updates',
+        'notifications',
+        'audit_logs'
+      ]
+    });
+    
+  } catch (error) {
+    console.error('Complete profile error:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch complete profile', 
+      message: error.message 
+    });
+  }
+});
+
+/**
+ * @route GET /api/medical-staff/:id/quick-profile
+ * @description Get lightweight doctor profile for cards/lists
+ * @access Private
+ */
+app.get('/api/medical-staff/:id/quick-profile', authenticateToken, apiLimiter, async (req, res) => {
+  try {
+    const { id } = req.params;
+    
+    const { data, error } = await supabase
+      .from('medical_staff')
+      .select(`
+        id, full_name, staff_type, specialization, professional_email,
+        mobile_phone, employment_status,
+        departments!medical_staff_department_id_fkey(name, code)
+      `)
+      .eq('id', id)
+      .single();
+    
+    if (error) {
+      if (error.code === 'PGRST116') {
+        return res.status(404).json({ error: 'Doctor not found' });
+      }
+      throw error;
+    }
+    
+    // Get current status
+    const { data: status } = await supabase
+      .from('clinical_status_updates')
+      .select('status_text')
+      .eq('author_id', id)
+      .gt('expires_at', new Date().toISOString())
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+    
+    // Check if on-call today
+    const today = new Date().toISOString().split('T')[0];
+    const { data: oncall } = await supabase
+      .from('oncall_schedule')
+      .select('shift_type')
+      .eq('duty_date', today)
+      .or(`primary_physician_id.eq.${id},backup_physician_id.eq.${id}`)
+      .single();
+    
+    res.json({
+      success: true,
+      data: {
+        id: data.id,
+        full_name: data.full_name,
+        staff_type: data.staff_type,
+        specialization: data.specialization,
+        contact: {
+          email: data.professional_email,
+          phone: data.mobile_phone
+        },
+        department: data.departments ? {
+          name: data.departments.name,
+          code: data.departments.code
+        } : null,
+        status: {
+          employment: data.employment_status,
+          availability: status?.status_text || 'Available',
+          oncall_today: !!oncall,
+          oncall_type: oncall?.shift_type || null
+        }
+      }
+    });
+    
+  } catch (error) {
+    console.error('Quick profile error:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch quick profile', 
+      message: error.message 
+    });
+  }
+});
+
+/**
+ * @route GET /api/medical-staff/:id/availability
+ * @description Get doctor's current and upcoming availability
+ * @access Private
+ */
+app.get('/api/medical-staff/:id/availability', authenticateToken, apiLimiter, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { start_date, end_date } = req.query;
+    
+    const today = start_date || new Date().toISOString().split('T')[0];
+    const end = end_date || new Date(Date.now() + 30 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    
+    // Get all events that affect availability
+    const [oncall, absences, rotations] = await Promise.all([
+      supabase
+        .from('oncall_schedule')
+        .select('duty_date, shift_type, start_time, end_time')
+        .eq('primary_physician_id', id)
+        .gte('duty_date', today)
+        .lte('duty_date', end)
+        .order('duty_date'),
+      
+      supabase
+        .from('staff_absence_records')
+        .select('start_date, end_date, absence_reason, coverage_arranged')
+        .eq('staff_member_id', id)
+        .eq('current_status', 'planned_leave')
+        .gte('start_date', today)
+        .lte('start_date', end),
+      
+      supabase
+        .from('resident_rotations')
+        .select('start_date, end_date, rotation_status, training_unit:training_units!resident_rotations_training_unit_id_fkey(unit_name)')
+        .eq('resident_id', id)
+        .gte('end_date', today)
+        .lte('start_date', end)
+    ]);
+    
+    // Generate availability calendar
+    const availability = [];
+    const currentDate = new Date(today);
+    const endDate = new Date(end);
+    
+    while (currentDate <= endDate) {
+      const dateStr = currentDate.toISOString().split('T')[0];
+      
+      // Check for conflicts
+      const oncallToday = oncall.data?.find(o => o.duty_date === dateStr);
+      const absenceToday = absences.data?.find(a => 
+        dateStr >= a.start_date && dateStr <= a.end_date
+      );
+      const rotationToday = rotations.data?.find(r =>
+        dateStr >= r.start_date && dateStr <= r.end_date
+      );
+      
+      availability.push({
+        date: dateStr,
+        day: currentDate.toLocaleDateString('en-US', { weekday: 'short' }),
+        status: absenceToday ? 'absent' : 
+                oncallToday ? 'oncall' : 
+                rotationToday ? 'in_rotation' : 'available',
+        details: {
+          oncall: oncallToday ? {
+            shift_type: oncallToday.shift_type,
+            hours: `${oncallToday.start_time} - ${oncallToday.end_time}`
+          } : null,
+          absence: absenceToday ? {
+            reason: absenceToday.absence_reason,
+            coverage_arranged: absenceToday.coverage_arranged
+          } : null,
+          rotation: rotationToday ? {
+            unit_name: rotationToday.training_unit?.unit_name,
+            status: rotationToday.rotation_status
+          } : null
+        }
+      });
+      
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+    
+    res.json({
+      success: true,
+      data: {
+        doctor_id: id,
+        period: { start: today, end: end },
+        availability_calendar: availability,
+        summary: {
+          total_days: availability.length,
+          available_days: availability.filter(a => a.status === 'available').length,
+          oncall_days: availability.filter(a => a.status === 'oncall').length,
+          absent_days: availability.filter(a => a.status === 'absent').length,
+          in_rotation_days: availability.filter(a => a.status === 'in_rotation').length
+        }
+      }
+    });
+    
+  } catch (error) {
+    console.error('Availability error:', error);
+    res.status(500).json({ 
+      error: 'Failed to fetch availability', 
+      message: error.message 
+    });
+  }
+});
+
+// ===== HELPER FUNCTIONS =====
+
+/**
+ * Calculate profile completeness percentage
+ */
+const calculateProfileCompleteness = (doctorData) => {
+  const requiredFields = [
+    'full_name', 'staff_type', 'professional_email',
+    'specialization', 'medical_license', 'date_of_birth',
+    'mobile_phone', 'department_id'
+  ];
+  
+  const filledFields = requiredFields.filter(field => 
+    doctorData[field] && doctorData[field].toString().trim() !== ''
+  ).length;
+  
+  return Math.round((filledFields / requiredFields.length) * 100);
+};
+
+/**
+ * Calculate active since duration
+ */
+const calculateActiveSince = (createdAt) => {
+  if (!createdAt) return 'Unknown';
+  
+  const created = new Date(createdAt);
+  const now = new Date();
+  const diffYears = now.getFullYear() - created.getFullYear();
+  const diffMonths = now.getMonth() - created.getMonth();
+  const totalMonths = diffYears * 12 + diffMonths;
+  
+  if (totalMonths < 1) return 'Less than a month';
+  if (totalMonths < 12) return `${totalMonths} month${totalMonths > 1 ? 's' : ''}`;
+  
+  const years = Math.floor(totalMonths / 12);
+  const months = totalMonths % 12;
+  
+  if (months === 0) return `${years} year${years > 1 ? 's' : ''}`;
+  return `${years} year${years > 1 ? 's' : ''}, ${months} month${months > 1 ? 's' : ''}`;
+};
 
 // ============ ERROR HANDLING ============
 
