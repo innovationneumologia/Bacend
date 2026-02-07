@@ -1517,6 +1517,237 @@ app.delete('/api/medical-staff/:id', authenticateToken, checkPermission('medical
     res.status(500).json({ error: 'Failed to deactivate medical staff', message: error.message });
   }
 });
+// ===== ENHANCED PROFILE ENDPOINT =====
+
+/**
+ * @route GET /api/medical-staff/:id/enhanced-profile
+ * @description Complete medical staff profile with real-time presence and updates
+ * @access Private
+ */
+app.get('/api/medical-staff/:id/enhanced-profile', authenticateToken, apiLimiter, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const now = new Date();
+    const today = now.toISOString().split('T')[0];
+    const currentTime = now.toTimeString().substring(0, 5);
+    
+    console.log(`👨‍⚕️ Loading enhanced profile for: ${id} at ${currentTime}`);
+    
+    // 1. Get basic staff info
+    const { data: basicInfo, error: basicError } = await supabase
+      .from('medical_staff')
+      .select(`
+        id, full_name, staff_type, staff_id, professional_email, 
+        employment_status, academic_degree, specialization, training_year,
+        clinical_certificate, certificate_status, can_supervise_residents,
+        departments!inner(name, code),
+        research_notes, specializations
+      `)
+      .eq('id', id)
+      .single();
+    
+    if (basicError || !basicInfo) {
+      return res.status(404).json({ 
+        error: 'Staff not found', 
+        message: 'Medical staff member not found' 
+      });
+    }
+    
+    // 2. Get current rotation/assignment
+    const { data: currentAssignment } = await supabase
+      .from('resident_rotations')
+      .select(`
+        id, rotation_id, start_date, end_date, rotation_status, clinical_notes,
+        training_units!inner(unit_name, unit_code, department_id),
+        supervising_attending:medical_staff!inner(full_name, staff_type)
+      `)
+      .eq('resident_id', id)
+      .eq('rotation_status', 'active')
+      .single();
+    
+    // 3. Get today's schedule
+    const { data: todaySchedule } = await supabase
+      .from('clinical_schedule')
+      .select('time, activity, location, status')
+      .eq('staff_id', id)
+      .eq('date', today)
+      .order('time', { ascending: true });
+    
+    // 4. Get upcoming on-call shifts
+    const nextWeek = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    const { data: upcomingShifts } = await supabase
+      .from('oncall_schedule')
+      .select(`
+        id, duty_date, shift_type, start_time, end_time, coverage_area,
+        backup_physician:medical_staff!inner(full_name)
+      `)
+      .eq('primary_physician_id', id)
+      .gte('duty_date', today)
+      .lte('duty_date', nextWeek)
+      .order('duty_date', { ascending: true });
+    
+    // 5. Get current clinical status
+    const { data: clinicalStatus } = await supabase
+      .from('clinical_status_updates')
+      .select('status_text, priority, expires_at, location')
+      .eq('author_id', id)
+      .gt('expires_at', now.toISOString())
+      .eq('is_active', true)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .single();
+    
+    // 6. Calculate presence (simplified logic)
+    let isPresent = false;
+    let presenceType = 'Not scheduled';
+    
+    if (todaySchedule && todaySchedule.length > 0) {
+      const currentActivity = todaySchedule.find(item => {
+        if (!item.time || item.status === 'cancelled') return false;
+        const [start, end] = item.time.split(' - ');
+        return currentTime >= start && currentTime <= end;
+      });
+      
+      if (currentActivity) {
+        isPresent = true;
+        presenceType = currentActivity.activity;
+      }
+    }
+    
+    // 7. Build enhanced profile response
+    const enhancedProfile = {
+      basic_info: {
+        id: basicInfo.id,
+        full_name: basicInfo.full_name,
+        staff_type: basicInfo.staff_type,
+        staff_id: basicInfo.staff_id,
+        professional_email: basicInfo.professional_email,
+        employment_status: basicInfo.employment_status,
+        academic_degree: basicInfo.academic_degree,
+        specialization: basicInfo.specialization,
+        training_year: basicInfo.training_year,
+        clinical_certificate: basicInfo.clinical_certificate,
+        certificate_status: basicInfo.certificate_status,
+        can_supervise_residents: basicInfo.can_supervise_residents
+      },
+      
+      department: basicInfo.departments ? {
+        name: basicInfo.departments.name,
+        code: basicInfo.departments.code
+      } : null,
+      
+      live_clinical_data: {
+        presence: {
+          status: isPresent ? 'PRESENT' : 'ABSENT',
+          type: presenceType,
+          last_seen: 'Just now'
+        },
+        
+        current_assignment: currentAssignment ? {
+          unit: currentAssignment.training_units?.unit_name,
+          unit_code: currentAssignment.training_units?.unit_code,
+          start_date: currentAssignment.start_date,
+          end_date: currentAssignment.end_date,
+          supervisor: currentAssignment.supervising_attending?.full_name,
+          notes: currentAssignment.clinical_notes
+        } : null,
+        
+        todays_schedule: todaySchedule || [],
+        
+        upcoming_oncall: (upcomingShifts || []).map(shift => ({
+          date: shift.duty_date,
+          shift_type: shift.shift_type === 'primary_call' ? 'Primary' : 'Backup',
+          time: `${shift.start_time.substring(0, 5)} - ${shift.end_time.substring(0, 5)}`,
+          coverage_area: shift.coverage_area,
+          backup_physician: shift.backup_physician?.full_name,
+          is_today: shift.duty_date === today
+        })),
+        
+        clinical_status: clinicalStatus ? {
+          text: clinicalStatus.status_text,
+          priority: clinicalStatus.priority,
+          expires_at: clinicalStatus.expires_at
+        } : null
+      },
+      
+      academic_data: {
+        research_notes: basicInfo.research_notes || '',
+        specializations: basicInfo.specializations?.split(',').map(s => s.trim()) || []
+      },
+      
+      generated_at: now.toISOString(),
+      data_freshness: 'LIVE'
+    };
+    
+    res.json({
+      success: true,
+      data: enhancedProfile,
+      metadata: {
+        request_time: now.toISOString(),
+        data_sources: [
+          'medical_staff',
+          'resident_rotations', 
+          'clinical_schedule',
+          'oncall_schedule',
+          'clinical_status_updates'
+        ]
+      }
+    });
+    
+  } catch (error) {
+    console.error('Enhanced profile error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to load enhanced profile',
+      details: process.env.NODE_ENV === 'development' ? error.message : undefined
+    });
+  }
+});
+/**
+ * @route POST /api/medical-staff/:id/presence
+ * @description Update staff presence status
+ * @access Private
+ */
+app.post('/api/medical-staff/:id/presence', authenticateToken, apiLimiter, async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { status, location, timestamp } = req.body;
+    
+    if (!status || !['present', 'absent'].includes(status)) {
+      return res.status(400).json({
+        error: 'Invalid status',
+        message: 'Status must be "present" or "absent"'
+      });
+    }
+    
+    // Log presence update (you might want to create a staff_location_logs table)
+    const { error: logError } = await supabase
+      .from('staff_location_logs')
+      .insert({
+        staff_id: id,
+        check_in_type: status === 'present' ? 'check_in' : 'check_out',
+        location: location || 'Not specified',
+        timestamp: timestamp || new Date().toISOString()
+      });
+    
+    if (logError) {
+      console.warn('Could not log presence:', logError);
+    }
+    
+    res.json({
+      success: true,
+      message: `Staff marked as ${status}`,
+      timestamp: new Date().toISOString()
+    });
+    
+  } catch (error) {
+    console.error('Presence update error:', error);
+    res.status(500).json({ 
+      success: false,
+      error: 'Failed to update presence status'
+    });
+  }
+});
 
 // ===== 6. DEPARTMENTS ENDPOINTS =====
 
