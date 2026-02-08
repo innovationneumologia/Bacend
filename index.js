@@ -1371,7 +1371,7 @@ app.post('/api/medical-staff', authenticateToken, checkPermission('medical_staff
       training_year: dataSource.training_year || null,
       
       // ✅ FIXED: Use correct column name from your database
-      clinical_study_certificate: dataSource.clinical_certificate || null,
+      clinical_study_certificate: dataSource.clinical_study_certificate || null,
       
       certificate_status: dataSource.certificate_status || null,
       resident_category: dataSource.resident_category || null,
@@ -1455,7 +1455,7 @@ app.put('/api/medical-staff/:id', authenticateToken, checkPermission('medical_st
       academic_degree: dataSource.academic_degree || null,
       specialization: dataSource.specialization || null,
       training_year: trainingYearValue,
-      clinical_study_certificate: dataSource.clinical_certificate || null,
+      clinical_study_certificate: dataSource.clinical_study_certificate || null,
       certificate_status: dataSource.certificate_status || null,
       updated_at: new Date().toISOString()
     };
@@ -1539,7 +1539,7 @@ app.get('/api/medical-staff/:id/enhanced-profile', authenticateToken, apiLimiter
       .select(`
         id, full_name, staff_type, staff_id, professional_email, 
         employment_status, academic_degree, specialization, training_year,
-        clinical_certificate, certificate_status, can_supervise_residents,
+        clinical_study_certificate, certificate_status, can_supervise_residents,
         departments!left(name, code),
         research_notes, specializations
       `)
@@ -1626,7 +1626,7 @@ app.get('/api/medical-staff/:id/enhanced-profile', authenticateToken, apiLimiter
         academic_degree: basicInfo.academic_degree,
         specialization: basicInfo.specialization,
         training_year: basicInfo.training_year,
-        clinical_certificate: basicInfo.clinical_certificate,
+        clinical_study_certificate: basicInfo.clinical_study_certificate,
         certificate_status: basicInfo.certificate_status,
         can_supervise_residents: basicInfo.can_supervise_residents
       },
