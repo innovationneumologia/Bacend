@@ -1540,7 +1540,7 @@ app.get('/api/medical-staff/:id/enhanced-profile', authenticateToken, apiLimiter
         id, full_name, staff_type, staff_id, professional_email, 
         employment_status, academic_degree, specialization, training_year,
         clinical_certificate, certificate_status, can_supervise_residents,
-        departments!inner(name, code),
+        departments!left(name, code),
         research_notes, specializations
       `)
       .eq('id', id)
@@ -1558,8 +1558,8 @@ app.get('/api/medical-staff/:id/enhanced-profile', authenticateToken, apiLimiter
       .from('resident_rotations')
       .select(`
         id, rotation_id, start_date, end_date, rotation_status, clinical_notes,
-        training_units!inner(unit_name, unit_code, department_id),
-        supervising_attending:medical_staff!inner(full_name, staff_type)
+        training_units!left(unit_name, unit_code, department_id),
+        supervising_attending:medical_staff!left(full_name, staff_type)
       `)
       .eq('resident_id', id)
       .eq('rotation_status', 'active')
